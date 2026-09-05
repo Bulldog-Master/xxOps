@@ -1,0 +1,9 @@
+[Unit]
+Description=Renew the xxOps TLS certificate
+
+[Service]
+EnvironmentFile=/etc/xxops/xxops.conf
+Type=oneshot
+WorkingDirectory=/var/lib/xxops/tls
+ExecStart=/usr/bin/tailscale cert ${XXOPS_TAILNET_HOST}
+ExecStartPost=/bin/systemctl restart xxops-app

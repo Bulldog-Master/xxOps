@@ -1,0 +1,22 @@
+[Unit]
+Description=xxOps
+Wants=network-online.target
+After=network-online.target tailscaled.service
+
+[Service]
+EnvironmentFile=/etc/xxops/xxops.conf
+User=__RUN_USER__
+Group=__RUN_USER__
+Type=simple
+WorkingDirectory=__APP_DIR__
+Environment=XXOPS_APP_DIR=__APP_DIR__
+Environment=XXOPS_STATE_DIR=/var/lib/xxops
+Environment=XXOPS_AM_CONFIG=/etc/alertmanager/alertmanager.yml
+Environment=XXOPS_AMTOOL=/usr/local/bin/amtool
+Environment=XXOPS_PORT=8080
+ExecStart=/usr/bin/python3 __APP_DIR__/xxops-server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

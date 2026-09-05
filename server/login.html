@@ -1,0 +1,104 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>xxOps</title><link rel="apple-touch-icon" href="/icon.png"><style>
+:root{color-scheme:dark}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+background:#0d1017;color:#e7ecf3;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.box{width:320px;padding:28px;border:1px solid #222836;border-radius:14px;background:#141926}
+h1{margin:0 0 4px;font-size:19px}
+p{margin:0 0 18px;color:#8b94a6;font-size:13px}
+input{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:9px;margin-bottom:8px;
+border:1px solid #222836;background:#0d1017;color:#e7ecf3;font-size:15px}
+button{width:100%;margin-top:6px;padding:10px;border-radius:9px;border:0;
+background:#6c7cf0;color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+.link{background:none;color:#8b94a6;font-weight:400;font-size:13px;margin-top:4px}
+.err{margin-top:10px;color:#f0776c;font-size:13px;min-height:18px}
+.pwrap{position:relative}
+.pwrap input{padding-right:64px}
+.peye{position:absolute;right:6px;top:5px;width:auto;margin:0;padding:5px 9px;background:none;border:1px solid #222836;border-radius:7px;color:#8b94a6;font-size:12px;font-weight:400;cursor:pointer}
+.hint{color:#8b94a6;font-size:12.5px;margin:-2px 0 10px}
+</style></head><body><div class="box" id="box"></div><script>
+let mode="login", pending=null;
+const $=id=>document.getElementById(id);
+function render(){
+  const b=$("box");
+  if(mode==="setup"){
+    b.innerHTML=`<h1>Welcome to xxOps</h1>
+      <p>No account exists yet. Create the first one - it will be the owner.</p>
+      <input id="u" placeholder="Username" autocapitalize="none" autofocus>
+      <div class="hint">lowercase letters, numbers, dot, dash or underscore</div>
+      <div class="pwrap"><input id="p" type="password" placeholder="Password"><button type="button" class="peye" id="pe">show</button></div>
+      <input id="p2" type="password" placeholder="Password again">
+      <button id="go">Create account</button><div class="err" id="e"></div>`;
+    $("go").onclick=doSetup;
+    wireEye();
+  } else if(mode==="totp"){
+    b.innerHTML=`<h1>One more step</h1>
+      <p>Enter the six digit code from your authenticator app.</p>
+      <input id="c" inputmode="numeric" placeholder="000000" autofocus>
+      <button id="go">Sign in</button>
+      <button class="link" id="rec">Use a recovery code instead</button>
+      <div class="err" id="e"></div>`;
+    $("go").onclick=()=>doLogin($("c").value.trim(),null);
+    $("rec").onclick=()=>{mode="recovery";render();};
+    $("c").onkeydown=e=>{if(e.key==="Enter")$("go").click();};
+  } else if(mode==="recovery"){
+    b.innerHTML=`<h1>Recovery code</h1>
+      <p>One of the codes you saved when you turned on two factor.</p>
+      <input id="c" placeholder="xxxxx-xxxxx" autocapitalize="none" autofocus>
+      <button id="go">Sign in</button>
+      <button class="link" id="back">Back to the app code</button>
+      <div class="err" id="e"></div>`;
+    $("go").onclick=()=>doLogin(null,$("c").value.trim());
+    $("back").onclick=()=>{mode="totp";render();};
+  } else {
+    b.innerHTML=`<h1>xxOps</h1><p>Sign in to continue.</p>
+      <input id="u" placeholder="Username" autocapitalize="none" autofocus>
+      <div class="pwrap"><input id="p" type="password" placeholder="Password"><button type="button" class="peye" id="pe">show</button></div>
+      <button id="go">Sign in</button><div class="err" id="e"></div>`;
+    $("go").onclick=()=>doLogin(null,null);
+    $("p").onkeydown=e=>{if(e.key==="Enter")$("go").click();};
+    wireEye();
+  }
+}
+function wireEye(){
+  const e=$("pe"), f=$("p");
+  if(!e||!f) return;
+  e.onclick=()=>{ const show = f.type==="password";
+    f.type = show ? "text" : "password";
+    e.textContent = show ? "hide" : "show";
+    f.focus(); };
+}
+async function post(path,body){
+  const r=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(body)});
+  return [r.status, await r.json().catch(()=>({}))];
+}
+async function doSetup(){
+  const u=$("u").value.trim(), p=$("p").value, p2=$("p2").value;
+  if(p!==p2){ $("e").textContent="Those passwords do not match."; return; }
+  const [,d]=await post("/api/auth/setup",{username:u,password:p});
+  if(d.ok) location.reload(); else $("e").textContent=d.message||"Could not create the account.";
+}
+async function doLogin(totp,recovery){
+  const body = pending ? {...pending} : {username:$("u").value.trim(), password:$("p").value};
+  if(totp) body.totp=totp;
+  if(recovery) body.recovery=recovery;
+  const [,d]=await post("/api/auth/login",body);
+  if(d.ok){ location.reload(); return; }
+  if(d.needsTotp && !totp && !recovery){ pending=body; mode="totp"; render(); return; }
+  if(d.needsTotp){
+    /* a WRONG code also returns needsTotp - re-rendering here wiped the
+       error and made a refusal look like the app doing nothing */
+    const _e=$("e"); if(_e) _e.textContent=d.message||"That code is not right.";
+    const _c=$("c"); if(_c){ _c.value=""; _c.focus(); }
+    return;
+  }
+  $("e").textContent=d.message||"That did not work.";
+}
+(async()=>{
+  const [,d]=await post("/api/auth/state",{});
+  mode = d.needsSetup ? "setup" : "login";
+  render();
+})();
+</script></body></html>

@@ -1,0 +1,7 @@
+[Unit]
+Description=xxOps monitor backup
+
+[Service]
+EnvironmentFile=/etc/xxops/xxops.conf
+Type=oneshot
+ExecStart=/usr/local/bin/xxops-backup.sh

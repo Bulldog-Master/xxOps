@@ -1,0 +1,7 @@
+[Unit]
+Description=xxOps daily digest
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/xxops-digest.py
