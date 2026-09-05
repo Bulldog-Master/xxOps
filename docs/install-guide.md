@@ -154,10 +154,12 @@ them once:
     sudo chown alertmanager:alertmanager /var/lib/alertmanager
 
 **The Prometheus unit.** Set your address once, then paste the block --
-the shell fills it in for you, so there is nothing left to replace:
+the shell fills it in for you, so there is nothing left to replace.
+
+**Copy the whole block in one go** — the first line is part of it, and the unit
+cannot fill itself in without it. Edit the address before you run it.
 
     MON=<MONITOR-IP>
-
     sudo tee /etc/systemd/system/prometheus.service >/dev/null <<EOF
     [Unit]
     Description=Prometheus
