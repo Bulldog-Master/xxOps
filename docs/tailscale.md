@@ -152,8 +152,14 @@ do not expect the two lists to match.
 
 ## Certificates
 
-If you want the app served over HTTPS, and your hosts are on Tailscale, it can
-issue a real certificate for the machine:
+**On the monitor only, and only if you want it.** The certificate is for the
+machine that serves the app to your browser. Nodes and gateways serve nothing
+to a browser, so a certificate on one would do nothing at all.
+
+The app works perfectly well over plain HTTP on a private network, and most
+operators never do this. If you want HTTPS anyway — browsers reserve some
+features, including passkeys, for it — Tailscale can issue a real certificate
+for the machine:
 
     sudo tailscale cert <machine-name>.<your-network>.ts.net
 
