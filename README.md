@@ -49,21 +49,15 @@ dynamic addresses work without any inbound access.
 
 ## Installing
 
-See [docs/install-guide.md](docs/install-guide.md). Roughly:
+**[docs/install-guide.md](docs/install-guide.md)** — start there and work
+through it. It covers the monitor once, then each node and gateway in turn.
 
-    # on the monitor, after installing Prometheus and Alertmanager
-    git clone https://github.com/Bulldog-Master/xxOps.git
-    cd xxOps
-    sudo ./install-monitor.sh --bind <MONITOR-IP>          # shows its plan
-    sudo ./install-monitor.sh --bind <MONITOR-IP> --apply
+Already running xxOps and adding another validator?
+**[docs/adding-a-validator.md](docs/adding-a-validator.md)** instead — the
+monitor is already done and you only touch the new hosts.
 
-    # on each node and gateway
-    curl -sL https://raw.githubusercontent.com/Bulldog-Master/xxOps/main/agent/install.sh \
-      | sudo bash -s -- <MONITOR-IP>:8099
-
-Both installers describe what they will do before doing it. Read the second
-one before piping it into a shell — you should not run anything from the
-internet as root without looking, and it is short.
+Both installers print what they intend to do and change nothing until you pass
+`--apply`.
 
 ## Security model
 
