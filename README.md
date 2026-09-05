@@ -35,13 +35,14 @@ do it for you.
 
 ## The shape of it
 
-    the monitor        Prometheus, Alertmanager and the xxOps app.
-                       One machine. For a small operator this is a
-                       gateway you already pay for, not a new VPS.
+**One machine is the monitor.** It runs Prometheus, Alertmanager and the xxOps
+app. It does not have to be a new VPS — for a small operator it is usually a
+gateway you already pay for.
 
-    each host          Grafana Alloy ships metrics outbound. A small
-                       producer writes the things no exporter covers.
-                       An agent answers signed requests from the monitor.
+**Every node and gateway runs three small things.** Grafana Alloy ships metrics
+outbound, a producer writes the things no exporter covers — cMix rounds,
+certificate expiry, log sizes — and an agent answers signed requests from the
+monitor so you can restart a service without opening a terminal.
 
 Metrics are pushed from hosts to the monitor, so hosts behind home routers on
 dynamic addresses work without any inbound access.
