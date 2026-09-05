@@ -677,6 +677,15 @@ Safe to re-run, which is also how you change the peers.
    a mesh VPN, so must the laptop, phone or tablet you are looking at it from —
    see [tailscale.md](tailscale.md). A device that is not on it gets
    "site can't be reached", which looks like the app is down when it is not.
+
+   **On a phone or tablet, add it to your home screen.** Share, then "Add to
+   Home Screen" on iOS, or the browser's install option on Android. It opens
+   full screen without browser chrome, which is a much better way to check on
+   things than a tab you have to find.
+
+   On iOS that copy keeps its own cookies, so **it signs in separately** from
+   the browser — being signed in in Safari does not sign you in there. Expect
+   to log in once more, not to have done something wrong.
 2. If you enable two-factor, **enrol once from one QR code**, then add other
    devices from that same code. Scanning a fresh code on a second device gives
    you two different secrets and neither will reliably work.
