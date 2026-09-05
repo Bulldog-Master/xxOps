@@ -5,6 +5,14 @@ hosts can reach the monitor on.
 
 ---
 
+> [!NOTE]
+> **Already have xxOps running and adding another validator?** You do not
+> start here. Part 1 is monitor setup and is already done — see
+> [adding-a-validator.md](adding-a-validator.md) instead.
+>
+> This guide is for a FIRST install. It covers any number of validators: the
+> monitor is installed once, and Part 2 is repeated per host.
+
 ## What you are building
 
 **The monitor.** One machine running Prometheus, Alertmanager and the xxOps
