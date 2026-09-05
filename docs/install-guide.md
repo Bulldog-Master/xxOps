@@ -291,9 +291,31 @@ backup ships to machines that key commands.
 > gateway. It needs these too — being the monitor does not exempt it from
 > being monitored.
 
+### The short way
 
-Do these **in order**. Alloy will not pick up a configuration written before it
-is installed, and it fails quietly.
+One command per host. The two things it cannot work out are at the front,
+where you can see them:
+
+    curl -sL https://raw.githubusercontent.com/Bulldog-Master/xxOps/main/fixes/xxops-host-install.sh \
+      | sudo bash -s -- --label <THIS-HOST-LABEL> --monitor <MONITOR-IP>
+
+`--label` is what you want this machine called in the app — short, lowercase,
+and unique across your hosts. If a gateway's label starts with its node's
+label, xxOps pairs them for you. `--monitor` is the address this host reaches
+the monitor on.
+
+It works out whether this is a node or a gateway by itself, installs Alloy, the
+producer, the agent, a logrotate rule and a journal cap, and then waits to
+confirm the monitor is actually receiving this host. It announces each step, so
+a failure tells you where it stopped. Safe to re-run.
+
+If it guesses the role wrong, pass `--role node` or `--role gateway`.
+
+**That is the whole of Part 2.** Everything below is the same work done by
+hand — worth reading if you want to know what the script did, and worth
+following if your system does not suit it.
+
+---
 
 ### 1. Network first
 
