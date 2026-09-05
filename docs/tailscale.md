@@ -36,11 +36,51 @@ If that is a problem, it is a good reason to take one of the alternatives
 below rather than a detail to discover later. Decide before you install
 anything.
 
-If that matters to you, **you do not need it.** Give your hosts stable
-addresses and a firewall rule permitting each one to reach the monitor's
-Prometheus port. Everything in xxOps works the same way — the guide asks for
-addresses, and it does not care where they came from. Headscale, a
-self-hosted coordination server, is a third option.
+If that matters to you, **you do not need it.** Everything in xxOps works the
+same way either route — the guide asks for addresses and does not care where
+they came from.
+
+## Doing it with a firewall instead
+
+> [!WARNING]
+> **Prometheus has no authentication of its own.** It must listen on an
+> address your hosts can reach, and if that is a public address with nothing
+> in front of it, it is listening to the internet. Anyone who finds it can
+> read every metric — your host names, your topology, your disk usage — and
+> because remote-write is enabled, anyone can also inject fabricated metrics,
+> which means your alerting can be made to lie to you.
+>
+> Whichever route you take, port 9090 must not be open to the world.
+
+The rule goes **on whichever machine runs the monitor**, because that is the
+machine with the listening port. Nothing goes on the nodes: they only make
+outbound connections, and outbound is allowed by default.
+
+    sudo ufw allow from <HOST-1> to any port 9090 proto tcp
+    sudo ufw allow from <HOST-2> to any port 9090 proto tcp
+    sudo ufw deny 9090
+
+Every host that pushes needs its own line — **including the monitor's own
+machine if it is also a node or gateway**. Miss one and that host silently
+stops reporting.
+
+**The catch: those are addresses, not names.** A node at home on a dynamic
+address drops off whenever the ISP changes it, and the symptom is a host that
+simply stops appearing, with nothing saying why.
+
+You can write the rule against a dynamic DNS name, but `ufw` **resolves it
+once, when the rule is added**, and stores the result. It does not re-resolve.
+So the same name that works for cMix — which looks it up on every connection —
+goes stale in a firewall rule. Fixing that means a scheduled job re-resolving
+and reloading, which is a moving part that fails quietly, and while it is
+broken a healthy node looks down.
+
+That asymmetry is the real argument for a mesh VPN: not that firewalls do not
+work, but that they need addresses that stay put.
+
+**Headscale** is a third option — Tailscale's coordination server, self-hosted,
+working with the standard client. Same result with no third party, at the cost
+of running it yourself.
 
 ## Setting it up
 

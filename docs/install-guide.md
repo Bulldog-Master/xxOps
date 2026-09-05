@@ -673,12 +673,27 @@ Safe to re-run, which is also how you change the peers.
    devices from that same code. Scanning a fresh code on a second device gives
    you two different secrets and neither will reliably work.
 3. Save your recovery codes somewhere off the machine.
-4. Add contacts under "Who gets told" and assign each their validators. Save
-   before inviting — a contact that has not been saved cannot be invited.
+4. Add contacts under **Settings → Contacts** and assign each their
+   validators. Save before inviting — a contact that has not been saved cannot
+   be invited.
 5. **Telegram notifications** need your own bot — alerts go through it and
    nobody else's. In Telegram, message `@BotFather`, send `/newbot`, pick a
-   name, and it hands you a token. Paste that into Settings, under "Who gets
-   told". Then tap Pair beside each contact — that gives you a short code. They send that code to your bot in Telegram, and the bot links their chat so their alerts reach them.
+   name, and it hands you a token. Copying that message brings the whole reply;
+   trim it to the token, which is digits, a colon, then a longer string.
+
+   Then, **in this order**, under Settings → Contacts:
+
+   1. Paste the token into the bot token field.
+   2. **Save settings.** Pairing reads the token from what has been SAVED, not
+      from what is in the box — so pairing before saving fails with "Add the
+      bot token first" while the token is plainly sitting there.
+   3. Tap **Pair** beside a contact. You get a short code.
+   4. That person sends the code to your bot in Telegram. The bot does not
+      reply; it just links their chat, and the app is where you see it worked.
+   5. **Save settings** again.
+
+   Nobody needs to find a Telegram chat id — the pairing code is how the bot
+   learns it.
 
 You can use the app from as many of your own devices as you like — each signs
 in separately. The limit is network reach: any device you want to use it from
