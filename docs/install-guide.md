@@ -336,11 +336,12 @@ two variables first and the block fills itself in:
   hand in the app later.
 - `MON` is your monitor's address.
 
-<!-- -->
+**Copy the whole block below in one go** — the two lines at the top are part
+of it, and the rest cannot fill itself in without them. Edit those two values
+before you run it.
 
     LABEL=<THIS-HOST-LABEL>
     MON=<MONITOR-IP>
-
     sudo tee /etc/alloy/config.alloy >/dev/null <<EOF
     logging {
       level  = "info"
