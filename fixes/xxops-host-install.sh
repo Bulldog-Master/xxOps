@@ -305,7 +305,13 @@ else
   say "producer installed (it has not written yet - the timer will)"
 fi
 
-if [ "$ROLE" = gateway ]; then
+# Inside the SKIP_AGENT check on purpose. This watchdog's timer runs as ROOT
+# and calls `systemctl restart` on the gateway directly - no sudo, no
+# signature, no confirmation. It is the least passive thing this installer
+# places, so a flag meaning "do not put anything on my validator that acts"
+# has to cover it. It used to install regardless, which made --skip-agent a
+# promise the installer did not keep.
+if [ "$ROLE" = gateway ] && [ "$SKIP_AGENT" = no ]; then
   CURRENT="installing the gateway watchdog"
   step "Installing the gateway watchdog"
   tmp="$(mktemp)"
@@ -336,6 +342,19 @@ EOF
   systemctl daemon-reload
   systemctl enable --now xxops-gateway-watchdog.timer >/dev/null 2>&1
   say "watchdog installed"
+elif [ "$ROLE" = gateway ]; then
+  say "watchdog NOT installed (--skip-agent)"
+  say "  Nothing installed here will restart your gateway. If it stops"
+  say "  gossiping you will be alerted, and the restart is yours to make."
+  # A host that HAD one from an earlier run keeps it unless it is removed,
+  # which would be a surprise in the other direction. Say so plainly.
+  if [ -f /etc/systemd/system/xxops-gateway-watchdog.timer ]; then
+    say ""
+    say "  NOTE: a watchdog from an earlier install is still present and"
+    say "  still running. To remove it:"
+    say "    sudo systemctl disable --now xxops-gateway-watchdog.timer"
+    say "    sudo rm -f /etc/systemd/system/xxops-gateway-watchdog.*"
+  fi
 fi
 
 # --- logrotate ---------------------------------------------------------------
