@@ -1,0 +1,10 @@
+[Unit]
+Description=xxOps daily digest
+After=network-online.target
+
+[Service]
+# Without this the script gets no XXOPS_PROM_URL and
+# falls back to loopback, which is not where Prometheus listens.
+EnvironmentFile=-/etc/xxops/xxops.conf
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/xxops-digest.py

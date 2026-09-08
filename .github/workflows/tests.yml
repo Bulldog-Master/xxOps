@@ -1,0 +1,44 @@
+# Run the test suite on every push and pull request.
+#
+# This does not block anything. It is evidence, not a gate: a green tick
+# beside a commit saying the security regression tests reproduced, without
+# anyone having to remember to run them. Making it required is a separate
+# decision, and one that changes how releases work.
+#
+# Actions are pinned to commit SHAs rather than tags. A tag is a moving
+# pointer; if it is ever repointed, a workflow that names it runs whatever it
+# now points at. That matters more here than in most repositories.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        # actions/checkout v4.1.7
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+
+      - name: Python version
+        run: python3 --version
+
+      - name: Server and agent tests
+        # run.py already exits non-zero on failure, so no extra plumbing.
+        # Some tests skip without promtool/amtool; that is expected here and
+        # the run is still meaningful - the authorization and session tests
+        # do not need them.
+        run: python3 tests/run.py
+
+      - name: App JavaScript tests
+        # node is present on ubuntu-latest. If it ever is not, this step
+        # should fail loudly rather than pass quietly - a skipped test that
+        # looks green is worse than a red one.
+        run: |
+          node --version
+          node tests/app_tests.js

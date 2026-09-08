@@ -1,0 +1,144 @@
+[
+ {
+  "id": "cmix-waiting-on-consensus",
+  "title": "cMix never starts: the wrapper waits on consensus forever",
+  "alertname": "NodeReportingNoRounds",
+  "tags": [
+   "cmix",
+   "slash",
+   "validator"
+  ],
+  "symptom": "The node looks healthy from every angle that usually matters. The host is reachable, the producer is running, the chain is syncing with peers and finalising blocks, and the cMix service reports as up. But no round number ever arrives, so the node earns nothing. Depending on how long it has been going, NoBlocksAuthored and PendingSlashes may also be firing.",
+  "diagnosis": "cMix is not running at all. `ps` shows the chain process and no cMix process; the wrapper log ends on 'Waiting on consensus ready state'. The wrapper stays alive waiting for the validator to be ready, so systemd correctly reports the unit as active - which is why the service check says up and why nothing based on the round metric fires either: with no cMix process there are no round lines in the log, so the producer emits no round series at all. An absent series is not a stalled one, and rules written against a value cannot see it.\n\nThe usual cause is that the validator has been chilled out of the active set, most often after a slash. Consensus never reaches the ready state the wrapper is waiting for, so cMix is never launched.",
+  "fix": "Re-validate in the xx network wallet. cMix starts on its own once the validator is back in the active set, which happens at the next era boundary and can be most of a day.\n\nRestarting the cMix service does NOT help - it parks on the same wait. Nor does rebooting. There is nothing wrong with the machine.\n\nCheck the chain first to rule out the other cause: if chain.log shows it importing and finalising with peers, the node is fine and this is a validator-status problem. If the chain is still syncing, that is a different problem and re-validating will not fix it.\n\nAn unapplied slash sits for a number of eras before it is applied. The cancel buttons in the wallet are a council action, not an operator one, so do not count on avoiding it.",
+  "host": "",
+  "created": 1785953509
+ },
+ {
+  "id": "b0b06e8fffa1bf0d",
+  "title": "Alertmanager was listening on the public internet and nobody chose it",
+  "symptom": "ss -ltn on the monitor showed *:9094 bound to all interfaces, including the machine's public address. Everything else was correctly on the tailnet address or loopback.",
+  "diagnosis": "9094 is Alertmanager's cluster port. Clustering is enabled by default, so the port opens itself at install and serves no purpose whatsoever for a single instance. It was never a decision, which is exactly why it went unnoticed - the ports someone deliberately opened get reviewed, the ones that open themselves do not. Until this was found, SSH was believed to be the only thing on that machine reachable from the internet.",
+  "fix": "Add --cluster.listen-address= (empty) to the Alertmanager unit's ExecStart, then daemon-reload and restart. 9094 disappears and 9093 stays on loopback. Back the unit up first, and afterwards send a test alert to confirm delivery still works - a service that starts is not a service that still reaches your phone. WORTH DOING ANYWHERE: run ss -ltn on the monitor and account for every listener, not just the ones you configured.",
+  "host": "the monitor",
+  "alertname": "",
+  "tags": [
+   "alertmanager",
+   "exposure",
+   "defaults",
+   "monitor"
+  ],
+  "created": 1785802504
+ },
+ {
+  "id": "05da5da48b6a048a",
+  "title": "A hardcoded list made --yes do nothing, and left a guard open",
+  "symptom": "Running a newly added changing action from the command line was refused with \"this action changes things and was not confirmed\" even with --yes. The same action worked fine from the app.",
+  "diagnosis": "xxops-cmd held a hardcoded set of the actions it considered changing, and it had only ever listed the original four. Two things followed. The confirm flag was attached to a request ONLY when the action was in that set, so for anything newer the flag was never sent and the agent correctly refused - --yes worked, it simply had nothing to attach to. FAR WORSE, the same set gates the refusal to run a changing action on more than one machine at once, so `xxops-cmd all stop-chain` was permitted rather than refused. That had been open since those actions shipped. The app was never affected because it works out whether an action changes things from the agent's own \"CHANGES THINGS -\" label rather than keeping its own list.",
+  "fix": "Always send the confirm flag, carrying whatever the user asked for, and let the agent enforce the rule - the caller no longer needs to know which actions are changing in order to ask correctly. Complete the local list so both guards hold. Better still, derive it from the catalogue the way the app does. GENERAL LESSON: a list that has to be updated by hand every time a feature is added will eventually not be, and the failure will be silent in the permissive direction.",
+  "host": "the monitor",
+  "alertname": "",
+  "tags": [
+   "agent",
+   "cli",
+   "safety",
+   "config-drift"
+  ],
+  "created": 1785802504
+ },
+ {
+  "id": "e7006d63e86d7997",
+  "title": "apt downloads everything and installs nothing: the agent's capabilities",
+  "symptom": "An update action reported success and returned immediately, but the host never rebooted and no package was upgraded. The log showed apt fetching hundreds of megabytes and then failing every chown and rename with \"Operation not permitted\", ending in \"0 upgraded\". shutdown -r now produced no error and did nothing.",
+  "diagnosis": "The agent's systemd unit restricts CapabilityBoundingSet, and a bounding set applies to EVERYTHING THE SERVICE SPAWNS, not just the service. The script had backgrounded itself with setsid, which starts a new session but stays in the same cgroup - so it was still root without the capabilities apt needs to chown files, and without the ability to talk to logind. A capability the bounding set has dropped cannot be regained: sudo does not help, and running as root does not help. The absence of an error made it worse, because both apt and shutdown reported success at the level the script could see.",
+  "fix": "Hand the work to systemd instead of backgrounding it: systemd-run --collect --unit=xxops-update /path/to/script --go. That returns immediately, exactly as the detach did, but the work runs as a fresh transient unit outside the agent's cgroup and restrictions. Use systemctl reboot rather than shutdown for the same reason. The transient unit also keeps its own record, so a failure is visible in journalctl -u xxops-update. GENERAL LESSON: anything spawned from a hardened service inherits its restrictions. If work needs privileges the service does not have, it has to leave the service's cgroup, not just its session.",
+  "host": "any host",
+  "alertname": "",
+  "tags": [
+   "agent",
+   "systemd",
+   "capabilities",
+   "silent-failure"
+  ],
+  "created": 1785802504
+ },
+ {
+  "id": "b249996571f64b71",
+  "title": "Wrapper silently stopped accepting signed commands: pyOpenSSL drifted",
+  "symptom": "gateway-wrapper.log (or cmix-wrapper.log) repeating \"Unable to verify command: module 'OpenSSL.crypto' has no attribute 'verify'\" followed by \"Failed to verify signature for command.jsonl\", every ten seconds. Nothing else looked wrong: the gateway kept peering with other gateways, gossip flowed, rounds advanced normally and no alert fired. Found only by reading the wrapper log by hand.",
+  "diagnosis": "pyOpenSSL 24.3.0 removed OpenSSL.crypto.verify, which the xx wrapper uses to check the signature on command.jsonl. The wrapper's Python dependencies are installed with pip --user into the service user's ~/.local and NOTHING IN THAT BUNDLE IS VERSION-PINNED, so any host whose dependencies were installed or refreshed after December 2024 picked up a version with the function removed. Across a single fleet the installed versions ranged from 21.0.0 (fine, from apt) through 24.2.1 (fine) to 25.0.0, 25.3.0 and 26.3.0 (all broken), with no pattern by role or OS - purely whenever each host was last touched. The break is confined to the Python wrapper, which is a separate process from the node or gateway binary. That is why every existing alert stayed silent: they all watch the binary. What actually stops working is the signed management-command path, which is how xx pushes binary updates - so an affected host would silently ignore them while looking perfectly healthy, the same shape as a host quietly missing a certificate rotation.",
+  "fix": "As the SERVICE USER on the affected host (not root - the deps live in that user's ~/.local): pip3 install --user 'pyopenssl<24.3'. That installs 24.2.1 and pulls cryptography back below 44, which is expected. On Ubuntu 24.every hosts pip refuses with externally-managed-environment (PEP 668); add --break-system-packages, which is safe here because --user keeps the write inside ~/.local. Then restart the service - xxnetwork-cmix on a node, xxnetwork-gateway on a gateway. THE RESTART IS NOT OPTIONAL: the check spawns a fresh python3, so the metric reads healthy as soon as the pin lands while the running wrapper still holds the old module in memory. Now detected by WrapperCommandVerifyBroken, from the producer metric xx_wrapper_cmd_verify_ok; xx_pyopenssl_version_info carries the installed version. NOTE this does not prevent recurrence - nothing pins the bundle, so a host that re-runs the install will drift forward again. The root fix is a constraints file alongside the xx wrapper's requirements, which is an xx-side change.",
+  "host": "all hosts",
+  "alertname": "WrapperCommandVerifyBroken",
+  "tags": [
+   "pyopenssl",
+   "wrapper",
+   "config-drift",
+   "silent-failure"
+  ],
+  "created": 1785681087
+ },
+ {
+  "id": "a569952988d5dd01",
+  "title": "Agent could not use sudo: systemd hardening silently blocks it",
+  "symptom": "An action returned: sudo: The no new privileges flag is set, which prevents sudo from running as root. Confusingly, systemctl show -p NoNewPrivileges reported no. Separately the agent audit trail was empty even though actions were clearly running.",
+  "diagnosis": "systemd turns NoNewPrivileges on IMPLICITLY for PrivateDevices, ProtectKernelTunables, ProtectControlGroups, RestrictAddressFamilies and LockPersonality, even when it is never set explicitly, and systemctl show still reports no. NoNewPrivileges blocks setuid binaries and sudo is one, so hardening and any sudo use are mutually exclusive. The same RestrictAddressFamilies=AF_INET AF_INET6 line separately killed the audit trail, because logger writes to a UNIX socket, not an inet one.",
+  "fix": "Removed those five options from the unit. Kept User=, AmbientCapabilities=CAP_DAC_READ_SEARCH, CapabilityBoundingSet plus CAP_SETUID and CAP_SETGID for sudo, ProtectSystem=full, ProtectHome, PrivateTmp and ReadWritePaths=/run. None of those imply NoNewPrivileges. Also note: sudo: unable to send audit message is COSMETIC. sudo cannot reach the kernel audit subsystem without a capability we deliberately do not grant, so it warns and proceeds with exit 0.",
+  "host": "all hosts",
+  "alertname": "",
+  "tags": [
+   "systemd",
+   "sudo",
+   "agent",
+   "hardening"
+  ],
+  "created": 1785177820
+ },
+ {
+  "id": "seed0001",
+  "title": "Gateway deaf to peers for a long time: the rotated cert was on the node",
+  "symptom": "Zero 'Gossip received' lines in the entire gateway log, while 'Local round data' kept appearing. Peers answered 'No host set up with <id>, refusing contact'. The log also showed 'WaitAuthorization: context deadline exceeded'. 14 watchdog restarts and a full two-host recovery changed nothing.",
+  "diagnosis": "The gateway certificate had expired: issued Apr 23 2022 with 2-year validity, dead since Apr 22 2024. An expired identity certificate fails authentication in BOTH directions, so the gateway cannot reach peers and peers cannot reach it. Check with: openssl x509 -in /opt/xxnetwork/cred/gateway-cert.crt -noout -dates. The October 2023 rotation moved every other gateway to a 10-year certificate expiring 2033; this host's copy was reverted by a restore from a pre-rotation image, which is why its whole cred directory is dated 1 Apr 2025. WHAT WE GOT WRONG: we concluded the certificate was gone and only xx could reissue it. It was not gone. The rotation had delivered a gateway certificate to BOTH machines of the validator pair, and the NODE still had its copy -- the paired node had it all along. Nobody thought to look on the node for the gateway's certificate.",
+  "fix": "Copy the certificate from the paired node. On the node, /opt/xxnetwork/cred/gateway-cert.crt was the rotated one (notAfter Oct 24 2033) while the gateway's had expired. VERIFY BEFORE COPYING -- all of these matched: subject, issuer, serial (the rotation extended validity on the SAME serial), Subject Alternative Name, and most importantly the public key. Compare the node cert's public key against the gateway's surviving private key with: openssl x509 -noout -pubkey | openssl pkey -pubin -outform DER | sha256sum, against openssl pkey -in gateway-key.key -pubout -outform DER | sha256sum. If those differ, the rotation issued a new keypair and the certificate alone is useless. THEN: stop the gateway service before swapping the file -- the running process holds the certificate loaded. Keep the expired one as old.gateway-cert.crt, which is both the convention on properly rotated gateways and the prefix the producer skips, so it will not fire CertificateExpired forever. Start the service and confirm 'Gossip received' appears in gateway.log. Do not treat an alert clearing as proof -- that misled us once on this exact host. GENERAL LESSON: when a credential looks unrecoverable, check the paired machine before asking for a reissue.",
+  "host": "any gateway",
+  "alertname": "GatewayIsolatedPersistent",
+  "tags": [
+   "certificate",
+   "gateway",
+   "peering",
+   "resolved",
+   "rotation"
+  ],
+  "created": 1785153769
+ },
+ {
+  "id": "seed0002",
+  "title": "Alert firing on a healthy host: the metrics were frozen, not the gateway",
+  "symptom": "GatewayDead fired repeatedly, but the gateway's own log showed healthy gossip every second and 164/every hosts connected. The reported round number had not moved in 16 hours.",
+  "diagnosis": "The metrics producer had stopped running, and a dead producer FREEZES its metrics rather than removing them - Alloy keeps republishing the last values it saw, so nothing looks missing. Both xxops-textfile systemd units were absent on that host while a healthy gateway had all four.",
+  "fix": "Recreated the service and timer, and the metric went fresh within 60 seconds. Now detected by ProducerStale, which watches the producer's own heartbeat. Note the producer rollout does NOT create the timers.",
+  "host": "any host",
+  "alertname": "GatewayDead",
+  "tags": [
+   "metrics",
+   "producer",
+   "false alarm"
+  ],
+  "created": 1785153769
+ },
+ {
+  "id": "seed0003",
+  "title": "Alert resolving and re-firing minutes apart with nothing fixed",
+  "symptom": "WatchdogGaveUp fired, resolved 40 minutes later, then fired again 5 minutes after that. Nothing had been changed in between.",
+  "diagnosis": "Two copies of the watchdog were running at once - the journal showed consecutive PIDs both printing 'attempt 2 of 3', where sequential runs would have printed 2 and 3. Only one timer existed and no cron entry, so it was an overlap rather than duplicate scheduling. The race corrupted the counters and made the two processes write the metric file at different stages.",
+  "fix": "Added an flock guard at the top of the script so a second copy exits immediately: exec 9>/var/lock/xxops-watchdog.lock then flock -n 9 || exit 0.",
+  "host": "any gateway",
+  "alertname": "WatchdogGaveUp",
+  "tags": [
+   "watchdog",
+   "race",
+   "flapping"
+  ],
+  "created": 1785153769
+ }
+]

@@ -1,0 +1,298 @@
+# Unit tests for the alerting rules, run by promtool against synthetic series.
+# No Prometheus instance, no fleet, no waiting - a scenario that takes half an
+# hour to occur on real hardware takes a millisecond here.
+#
+# WHY THESE PARTICULAR RULES. Most of the twenty-odd alerts are a single
+# comparison and reading them is enough. These are the ones where the logic is
+# subtle enough that reading is not:
+#
+#   - the count() guards, which once silenced GatewayDead completely
+#   - the per-gateway / whole-network split, where firing the wrong one sends
+#     someone to restart a machine during a network outage
+#   - the conditions that SUPPRESS NodeNotInRounds, each of which exists so a
+#     different, more specific alert can own that situation
+#
+# THE MOST IMPORTANT TEST HERE is "a stalled gateway still alerts when nothing
+# else is wrong". Without `or vector(0)`, count() over an empty set returns an
+# empty vector, `and on()` against empty yields empty, and GatewayDead can
+# NEVER FIRE. Not less often - never, silently, forever. That test fails the
+# moment the guard is removed.
+#
+# WHY THESE ASSERT ON THE `ALERTS` SERIES RATHER THAN ON exp_alerts. promtool
+# compares annotations exactly, so an exp_alerts assertion pins the detail
+# prose word for word - and every wording improvement would then break a test
+# that has nothing to do with wording. ALERTS carries the labels and the
+# firing state and no prose at all, which is exactly what is under test here.
+# That summaries and severities EXIST is checked separately, in test_rules.py.
+
+rule_files:
+  - ../alerting/xxops-rules.yml
+
+evaluation_interval: 1m
+
+tests:
+
+  # ---------------------------------------------------------------- gateways
+
+  - interval: 1m
+    name: "a stalled gateway alerts while the rest of the fleet is fine"
+    input_series:
+      - series: 'xx_gateway_local_round{instance="alpha_gw",pilot="xxops"}'
+        values: '100+1x15 116+0x40'
+      - series: 'xx_gateway_local_round{instance="bravo_gw",pilot="xxops"}'
+        values: '200+1x55'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="GatewayDead",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples:
+          - labels: 'ALERTS{alertname="GatewayDead", alertstate="firing", instance="alpha_gw", pilot="xxops", severity="red"}'
+            value: 1
+      - expr: 'ALERTS{alertname="NetworkRoundsStalled",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []
+
+  - interval: 1m
+    name: "a healthy gateway raises nothing"
+    input_series:
+      - series: 'xx_gateway_local_round{instance="alpha_gw",pilot="xxops"}'
+        values: '100+1x55'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="GatewayDead",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []
+      - expr: 'ALERTS{alertname="NetworkRoundsStalled",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []
+
+  - interval: 1m
+    name: "five silent gateways read as the network, not as five machines"
+    input_series:
+      - series: 'xx_gateway_warn_lines{instance="a_gw",pilot="xxops"}'
+        values: '1+0x55'
+      - series: 'xx_gateway_warn_lines{instance="b_gw",pilot="xxops"}'
+        values: '1+0x55'
+      - series: 'xx_gateway_warn_lines{instance="c_gw",pilot="xxops"}'
+        values: '1+0x55'
+      - series: 'xx_gateway_warn_lines{instance="d_gw",pilot="xxops"}'
+        values: '1+0x55'
+      - series: 'xx_gateway_warn_lines{instance="e_gw",pilot="xxops"}'
+        values: '1+0x55'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="NetworkRoundsStalled",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples:
+          - labels: 'ALERTS{alertname="NetworkRoundsStalled", alertstate="firing", severity="red"}'
+            value: 1
+      # and every per-gateway page is held back, so nobody is sent to restart
+      # five machines during a network outage
+      - expr: 'ALERTS{alertname="GatewayDead",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []
+
+  - interval: 1m
+    name: "four silent gateways are still four machines, not the network"
+    input_series:
+      - series: 'xx_gateway_warn_lines{instance="a_gw",pilot="xxops"}'
+        values: '1+0x55'
+      - series: 'xx_gateway_warn_lines{instance="b_gw",pilot="xxops"}'
+        values: '1+0x55'
+      - series: 'xx_gateway_warn_lines{instance="c_gw",pilot="xxops"}'
+        values: '1+0x55'
+      - series: 'xx_gateway_warn_lines{instance="d_gw",pilot="xxops"}'
+        values: '1+0x55'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="NetworkRoundsStalled",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []
+
+  # ------------------------------------------------------------------- nodes
+
+  - interval: 1m
+    name: "a node up but not advancing rounds alerts"
+    input_series:
+      - series: 'xx_cmix_last_round{instance="alpha",pilot="xxops"}'
+        values: '5000+0x55'
+      - series: 'xx_service_up{instance="alpha",service="xxnetwork-cmix",pilot="xxops"}'
+        values: '1+0x55'
+      - series: 'substrate_node_roles{instance="alpha",pilot="xxops"}'
+        values: '4+0x55'
+      - series: 'xx_cmix_err_file_present{instance="alpha",pilot="xxops"}'
+        values: '0+0x55'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="NodeNotInRounds",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples:
+          - labels: 'ALERTS{alertname="NodeNotInRounds", alertstate="firing", instance="alpha", pilot="xxops", severity="red"}'
+            value: 1
+
+  - interval: 1m
+    name: "an error file means CmixStuck owns it, not NodeNotInRounds"
+    input_series:
+      - series: 'xx_cmix_last_round{instance="alpha",pilot="xxops"}'
+        values: '5000+0x55'
+      - series: 'xx_service_up{instance="alpha",service="xxnetwork-cmix",pilot="xxops"}'
+        values: '1+0x55'
+      - series: 'substrate_node_roles{instance="alpha",pilot="xxops"}'
+        values: '4+0x55'
+      - series: 'xx_cmix_err_file_present{instance="alpha",pilot="xxops"}'
+        values: '1+0x55'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="NodeNotInRounds",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []
+
+  - interval: 1m
+    name: "a stopped service means CmixServiceDown owns it"
+    input_series:
+      - series: 'xx_cmix_last_round{instance="alpha",pilot="xxops"}'
+        values: '5000+0x55'
+      - series: 'xx_service_up{instance="alpha",service="xxnetwork-cmix",pilot="xxops"}'
+        values: '0+0x55'
+      - series: 'substrate_node_roles{instance="alpha",pilot="xxops"}'
+        values: '4+0x55'
+      - series: 'xx_cmix_err_file_present{instance="alpha",pilot="xxops"}'
+        values: '0+0x55'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="NodeNotInRounds",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []
+
+  - interval: 1m
+    name: "a gateway is not a node, so the node rule ignores it"
+    input_series:
+      - series: 'xx_cmix_last_round{instance="alpha_gw",pilot="xxops"}'
+        values: '5000+0x55'
+      - series: 'xx_service_up{instance="alpha_gw",service="xxnetwork-cmix",pilot="xxops"}'
+        values: '1+0x55'
+      - series: 'substrate_node_roles{instance="alpha_gw",pilot="xxops"}'
+        values: '1+0x55'
+      - series: 'xx_cmix_err_file_present{instance="alpha_gw",pilot="xxops"}'
+        values: '0+0x55'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="NodeNotInRounds",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []
+
+  - interval: 1m
+    name: "a node that has never had a round is not alerted on"
+    input_series:
+      - series: 'xx_cmix_last_round{instance="alpha",pilot="xxops"}'
+        values: '0+0x55'
+      - series: 'xx_service_up{instance="alpha",service="xxnetwork-cmix",pilot="xxops"}'
+        values: '1+0x55'
+      - series: 'substrate_node_roles{instance="alpha",pilot="xxops"}'
+        values: '4+0x55'
+      - series: 'xx_cmix_err_file_present{instance="alpha",pilot="xxops"}'
+        values: '0+0x55'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="NodeNotInRounds",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []
+
+  - interval: 1m
+    name: "a node advancing normally raises nothing"
+    input_series:
+      - series: 'xx_cmix_last_round{instance="alpha",pilot="xxops"}'
+        values: '5000+7x55'
+      - series: 'xx_service_up{instance="alpha",service="xxnetwork-cmix",pilot="xxops"}'
+        values: '1+0x55'
+      - series: 'substrate_node_roles{instance="alpha",pilot="xxops"}'
+        values: '4+0x55'
+      - series: 'xx_cmix_err_file_present{instance="alpha",pilot="xxops"}'
+        values: '0+0x55'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="NodeNotInRounds",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []
+      - expr: 'ALERTS{alertname="CmixStopped",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []
+
+  # ----------------------------------------------------------------- wrapper
+
+  - interval: 1m
+    name: "the wrapper check distinguishes broken from not-applicable"
+    input_series:
+      # 0 means it tried and failed - that is the alert
+      - series: 'xx_wrapper_cmd_verify_ok{instance="alpha",pilot="xxops"}'
+        values: '0+0x30'
+      # -1 means there was nothing to check, which is not a fault
+      - series: 'xx_wrapper_cmd_verify_ok{instance="bravo",pilot="xxops"}'
+        values: '-1+0x30'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="WrapperCommandVerifyBroken",alertstate="firing"}'
+        eval_time: 25m
+        exp_samples:
+          - labels: 'ALERTS{alertname="WrapperCommandVerifyBroken", alertstate="firing", instance="alpha", pilot="xxops", severity="amber"}'
+            value: 1
+
+  - interval: 1m
+    name: "a node whose round metric vanished entirely is caught"
+    input_series:
+      - series: 'xx_cmix_err_file_present{instance="alpha",pilot="xxops"}'
+        values: '0+0x55'
+      - series: 'substrate_node_roles{instance="alpha",pilot="xxops"}'
+        values: '4+0x55'
+      - series: 'xx_service_up{instance="alpha",service="xxnetwork-cmix",pilot="xxops"}'
+        values: '1+0x55'
+    promql_expr_test:
+      # the service reads UP throughout - a wrapper waiting on consensus keeps
+      # the unit active without ever starting cMix, which is why this rule
+      # exists rather than relying on the service check
+      - expr: 'ALERTS{alertname="NodeReportingNoRounds",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples:
+          - labels: 'ALERTS{alertname="NodeReportingNoRounds", alertstate="firing", instance="alpha", pilot="xxops", severity="red"}'
+            value: 1
+      - expr: 'ALERTS{alertname="NodeNotInRounds",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []
+      - expr: 'ALERTS{alertname="CmixServiceDown",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []
+
+  - interval: 1m
+    name: "a gateway without a cmix round metric is not a fault"
+    input_series:
+      - series: 'xx_cmix_err_file_present{instance="alpha_gw",pilot="xxops"}'
+        values: '0+0x55'
+      - series: 'substrate_node_roles{instance="alpha_gw",pilot="xxops"}'
+        values: '1+0x55'
+    promql_expr_test:
+      # without the role filter this matched every gateway on the fleet
+      - expr: 'ALERTS{alertname="NodeReportingNoRounds",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []
+
+  - interval: 1m
+    name: "five nodes at once reads as upstream and the per-node pages stop"
+    input_series:
+      - series: 'xx_cmix_err_file_present{instance="a",pilot="xxops"}'
+        values: '0+0x55'
+      - series: 'substrate_node_roles{instance="a",pilot="xxops"}'
+        values: '4+0x55'
+      - series: 'xx_cmix_err_file_present{instance="b",pilot="xxops"}'
+        values: '0+0x55'
+      - series: 'substrate_node_roles{instance="b",pilot="xxops"}'
+        values: '4+0x55'
+      - series: 'xx_cmix_err_file_present{instance="c",pilot="xxops"}'
+        values: '0+0x55'
+      - series: 'substrate_node_roles{instance="c",pilot="xxops"}'
+        values: '4+0x55'
+      - series: 'xx_cmix_err_file_present{instance="d",pilot="xxops"}'
+        values: '0+0x55'
+      - series: 'substrate_node_roles{instance="d",pilot="xxops"}'
+        values: '4+0x55'
+      - series: 'xx_cmix_err_file_present{instance="e",pilot="xxops"}'
+        values: '0+0x55'
+      - series: 'substrate_node_roles{instance="e",pilot="xxops"}'
+        values: '4+0x55'
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="ManyNodesReportingNoRounds",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples:
+          - labels: 'ALERTS{alertname="ManyNodesReportingNoRounds", alertstate="firing", severity="red"}'
+            value: 1
+      - expr: 'ALERTS{alertname="NodeReportingNoRounds",alertstate="firing"}'
+        eval_time: 45m
+        exp_samples: []

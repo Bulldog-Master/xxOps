@@ -1,0 +1,562 @@
+groups:
+  - name: xxops
+    rules:
+
+      - alert: HostUnreachable
+        expr: |
+          count by (instance) (max_over_time(up{pilot="xxops"}[24h]))
+          unless count by (instance) (up{pilot="xxops"})
+        for: 5m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $labels.instance }} has stopped reporting"
+          detail: "No metrics are arriving from this host at all."
+
+      - alert: ScrapeFailing
+        expr: max by (instance, job) (up{pilot="xxops"}) == 0
+        for: 10m
+        labels: { severity: amber }
+        annotations:
+          summary: "{{ $labels.instance }} cannot scrape {{ $labels.job }}"
+
+      - alert: CmixStopped
+        expr: (xx_cmix_last_round - (xx_cmix_last_round offset 10m)) <= 0
+        for: 5m
+        labels: { severity: red }
+        annotations:
+          summary: "cMix stopped on {{ $labels.instance }}"
+          detail: "No new round in 10 minutes. Rounds normally land every 15-30s."
+
+      - alert: CmixStuck
+        expr: xx_cmix_err_file_present == 1
+        for: 10m
+        labels: { severity: red }
+        annotations:
+          summary: "cMix has stopped on {{ $labels.instance }} and will not restart itself"
+          detail: "cMix wrote an error file and exited. The wrapper does not
+            restart it - it is built to stop and wait for a person, so it does
+            not loop. Nothing will happen until you act. Check with: ps -A |
+            grep xxn - a defunct cmix confirms it. The reason is in
+            /opt/xxnetwork/log/cmix-err.log, base64 encoded: tail -1 that file
+            and pipe it through base64 -d. A common cause is a brief DNS
+            failure resolving the scheduling server, which cMix does not
+            survive. Once the cause is cleared: sudo systemctl restart
+            xxnetwork-cmix. This node is not earning while it is down."
+
+      - alert: NodeReportingNoRounds
+        expr: |
+          (
+            (xx_cmix_err_file_present unless xx_cmix_last_round)
+            and on(instance) (substrate_node_roles == 4)
+          )
+          and on()
+          ((count((xx_cmix_err_file_present unless xx_cmix_last_round)
+                and on(instance) (substrate_node_roles == 4)) or vector(0)) < 5)
+        for: 10m
+        labels: { severity: red }
+        annotations:
+          summary: "Node {{ $labels.instance }} is not producing rounds at all"
+          detail: "The host is reporting and the producer is running, but no
+            round number is arriving - so cMix is not producing rounds, even
+            though its service may look active. A wrapper waiting on consensus
+            keeps the systemd unit alive without ever starting cMix, which is
+            why the service check cannot see this. Read the wrapper log, and
+            check the validator in the xx network wallet: a chilled or slashed
+            validator never reaches the ready state the wrapper waits for, and
+            restarting the service will only wait again. This node is not
+            earning."
+
+      - alert: ManyNodesReportingNoRounds
+        expr: |
+          (count((xx_cmix_err_file_present unless xx_cmix_last_round)
+                and on(instance) (substrate_node_roles == 4)) or vector(0)) >= 5
+        for: 10m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $value }} nodes are not producing rounds at all"
+          detail: "Several nodes stopped producing rounds together, which
+            points upstream rather than at any one machine. Per-node alerts are
+            held back while this is firing and resume when it clears. Check
+            whether the network is producing rounds before touching individual
+            validators."
+
+      - alert: NodeNotInRounds
+        expr: |
+          (changes(xx_cmix_last_round[30m]) == 0)
+           and on(instance) (xx_cmix_last_round > 0)
+           and on(instance) (xx_service_up{service="xxnetwork-cmix"} == 1)
+           and on(instance) (substrate_node_roles == 4)
+           and on(instance) (xx_cmix_err_file_present == 0)
+          and on() ((count((changes(xx_cmix_last_round[30m]) == 0)
+                and on(instance) (xx_cmix_last_round > 0)
+                and on(instance) (xx_service_up{service="xxnetwork-cmix"} == 1)
+                and on(instance) (substrate_node_roles == 4)
+                and on(instance) (xx_cmix_err_file_present == 0)) or vector(0)) < 5)
+        for: 10m
+        labels: { severity: red }
+        annotations:
+          summary: "Node {{ $labels.instance }} is up but not processing rounds"
+          detail: "cMix is running and the chain role is correct, but the round
+            number has not moved in 30 minutes. This is usually the waiting
+            state - check the validator in the xx network wallet, it may need
+            re-validating. IF YOU HAVE ALREADY RE-VALIDATED, there is nothing
+            more to do: it rejoins at the next era boundary, which can be most
+            of a day, and the wallet will show it under Waiting until then.
+            Restarting will not speed that up and will not fix the first case
+            either. This node is not earning until it rejoins."
+
+      - alert: ManyNodesNotInRounds
+        expr: |
+          (count((changes(xx_cmix_last_round[30m]) == 0)
+                and on(instance) (xx_cmix_last_round > 0)
+                and on(instance) (xx_service_up{service="xxnetwork-cmix"} == 1)
+                and on(instance) (substrate_node_roles == 4)
+                and on(instance) (xx_cmix_err_file_present == 0)) or vector(0)) >= 5
+        for: 10m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $value }} nodes are up but not processing rounds"
+          detail: "Several nodes stopped advancing rounds at once, which points
+            upstream rather than at any one machine - check whether permissioning
+            is reachable before touching individual validators."
+
+      - alert: GatewayDead
+        expr: |
+          (
+            ((xx_gateway_local_round - (xx_gateway_local_round offset 15m)) <= 0)
+            or (xx_gateway_warn_lines unless xx_gateway_local_round)
+          )
+          and on()
+          ((count(xx_gateway_warn_lines unless xx_gateway_local_round) or vector(0)) < 5)
+        for: 10m
+        labels: { severity: red }
+        annotations:
+          summary: "Gateway {{ $labels.instance }} has stopped processing rounds"
+          detail: >-
+            No new round from its own node in 15 minutes, and the rest of the
+            fleet is still advancing - so this is this gateway, not the
+            network.
+
+      - alert: NetworkRoundsStalled
+        expr: |
+          (count(xx_gateway_warn_lines unless xx_gateway_local_round) or vector(0)) >= 5
+        for: 10m
+        labels: { severity: red }
+        annotations:
+          summary: "Rounds have stopped across {{ $value }} gateways at once"
+          detail: >-
+            Enough gateways stopped seeing rounds together that this looks like
+            the network rather than your machines. Per-gateway alerts are held
+            back while this is firing, and resume when it clears. Nothing to
+            restart - check whether the network is producing rounds.
+
+      - alert: GatewayIsolated
+        expr: |
+          (
+            ((xx_gateway_local_round - (xx_gateway_local_round offset 15m)) > 0)
+            and on(instance)
+            ((xx_gateway_last_round - (xx_gateway_last_round offset 15m)) <= 0)
+          )
+          or (xx_gateway_local_round unless xx_gateway_last_round)
+        for: 15m
+        labels: { severity: amber }
+        annotations:
+          summary: "Gateway {{ $labels.instance }} is not receiving peer gossip"
+          detail: "It is processing its own rounds. The watchdog will restart it."
+
+      - alert: GatewayIsolatedPersistent
+        expr: |
+          (
+            ((xx_gateway_local_round - (xx_gateway_local_round offset 15m)) > 0)
+            and on(instance)
+            ((xx_gateway_last_round - (xx_gateway_last_round offset 15m)) <= 0)
+          )
+          or (xx_gateway_local_round unless xx_gateway_last_round)
+        for: 4h
+        labels: { severity: red }
+        annotations:
+          summary: "Gateway {{ $labels.instance }} still isolated after a restart"
+          detail: "Peer gossip has not returned despite the watchdog restarting it."
+
+      - alert: CmixServiceDown
+        expr: xx_service_up{service="xxnetwork-cmix"} == 0 and on(instance) substrate_node_roles == 4
+        for: 5m
+        labels: { severity: red }
+        annotations:
+          summary: "cMix service is down on {{ $labels.instance }}"
+
+      - alert: GatewayServiceDown
+        expr: xx_service_up{service="xxnetwork-gateway"} == 0 and on(instance) substrate_node_roles == 1
+        for: 5m
+        labels: { severity: red }
+        annotations:
+          summary: "Gateway service is down on {{ $labels.instance }}"
+
+      - alert: ChainServiceDown
+        expr: xx_service_up{service="xxnetwork-chain"} == 0
+        for: 5m
+        labels: { severity: red }
+        annotations:
+          summary: "Chain service is down on {{ $labels.instance }}"
+
+      - alert: DiskCritical
+        expr: |
+          (node_filesystem_avail_bytes{job!="monitor-host",mountpoint!~"/boot.*",fstype!~"tmpfs|squashfs|overlay|devtmpfs|ramfs|iso9660"}
+           / node_filesystem_size_bytes{job!="monitor-host",mountpoint!~"/boot.*",fstype!~"tmpfs|squashfs|overlay|devtmpfs|ramfs|iso9660"}) < 0.08
+        for: 30m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $labels.instance }} is nearly out of disk on {{ $labels.mountpoint }}"
+          detail: "Under 8% free."
+
+      - alert: ValidatorNotElected
+        expr: |
+          (rate(substrate_finality_grandpa_prevotes_total[1h]) == 0)
+          and on(instance) (substrate_node_roles == 4)
+          and on(instance) (rate(substrate_block_height{status="finalized"}[15m]) > 0)
+        for: 1h
+        labels: { severity: amber }
+        annotations:
+          summary: "{{ $labels.instance }} is not in the active validator set"
+          detail: "The node is healthy and following the chain but is not voting, so it is not currently earning."
+
+      - alert: PendingSlashes
+        expr: max(xx_chain_pending_slashes) > 0
+        for: 10m
+        labels: { severity: red }
+        annotations:
+          summary: "The chain has {{ $value }} pending slash(es)"
+          detail: "Network-wide, so it may not be one of yours. Pending means queued but not yet applied."
+
+      - alert: ChainRPCUnavailable
+        expr: |
+          (xx_chain_rpc_up == 0) and on(instance) (substrate_node_roles == 4)
+        for: 30m
+        labels: { severity: amber }
+        annotations:
+          summary: "{{ $labels.instance }} is not answering local chain RPC"
+          detail: "Slash and election checks cannot run against this node."
+
+      - alert: NoBlocksAuthored
+        expr: |
+          (increase(substrate_proposer_block_constructed_count[3h]) == 0)
+          and on(instance) (substrate_node_roles == 4)
+          and on(instance) (rate(substrate_finality_grandpa_prevotes_total[1h]) > 0)
+        for: 30m
+        labels: { severity: amber }
+        annotations:
+          summary: "{{ $labels.instance }} is elected but has authored no blocks in 3h"
+          detail: "It is in the active set and voting, so it should be producing. Healthy nodes here author 60-170 blocks every 6h, so a full stop is worth checking."
+
+      - alert: ProducerStale
+        # Narrowed: the reachable case is ProducerStalledHostReachable
+        # below. Without this the two alerts fire together for one event.
+        expr: (time() - xx_textfile_producer_last_run > 600)
+          unless on(instance) (max by (instance) (up) == 1)
+        for: 5m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $labels.instance }} has stopped producing metrics"
+          detail: "Its xx metrics are frozen at their last values, so cMix, gateway, disk and log checks on this host are no longer trustworthy. The host itself is still up."
+
+      - alert: WatchdogGaveUp
+        expr: xx_gateway_watchdog_gave_up == 1
+        for: 5m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $labels.instance }} needs you - automated recovery has stopped"
+          detail: "The watchdog restarted this gateway 3 times and peer gossip did not return, so it has stopped trying. Check the certificate first (openssl x509 -in /opt/xxnetwork/cred/gateway-cert.crt -noout -dates) - an expired one fails auth in both directions and no restart can fix it. Otherwise run the two-host sequence: restart the gateway, stop cMix on its node, wait for the gateway, then start cMix."
+
+      - alert: NodeAddressUnresolvable
+        expr: xx_node_dns_resolves == 0
+        for: 15m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $labels.instance }} cannot resolve its node address"
+          detail: "The dyndns name this gateway uses to reach its node has stopped resolving, so it cannot find the node at all. Check the record at the dyndns provider and the update client running on the node."
+
+      - alert: PostgresDown
+        expr: xx_service_up{service="postgresql"} == 0
+        for: 10m
+        labels: { severity: red }
+        annotations:
+          summary: "PostgreSQL is not running on {{ $labels.instance }}"
+          detail: "cMix on a node and the gateway process both depend on it. Rounds will stall while it is down. The 10 minute hold means this is not a package upgrade restart."
+      - alert: CertificateExpired
+        expr: xx_cert_expiry_seconds < time()
+        for: 10m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $labels.instance }}: {{ $labels.cert }} has expired"
+          detail: "An expired identity certificate fails authentication in both directions and no restart can fix it. This is what took one gateway off the network for a long time, unnoticed."
+
+      - alert: CertificateExpiringSoon
+        expr: (xx_cert_expiry_seconds - time()) / 86400 < 30 and (xx_cert_expiry_seconds - time()) > 0
+        for: 1h
+        labels: { severity: amber }
+        annotations:
+          summary: "{{ $labels.instance }}: {{ $labels.cert }} expires within 30 days"
+          detail: "Renew it before it lapses. Once expired the host stops authenticating and no restart will fix it."
+
+
+      - alert: NoLogRotation
+        expr: xx_logrotate_rule_present == 0
+        for: 1h
+        labels: { severity: amber }
+        annotations:
+          summary: "{{ $labels.instance }} has no logrotate rule"
+          detail: "Logs will grow unbounded. Not urgent."
+
+  - name: monitor
+    interval: 30s
+    rules:
+      - alert: AlertmanagerDown
+        expr: up{job="alertmanager"} == 0
+        for: 5m
+        labels: { severity: red }
+        annotations:
+          summary: "Alertmanager is not answering"
+          detail: >-
+            Prometheus is still collecting, but nothing can be delivered while
+            Alertmanager is down. This alert can only reach you once it comes
+            back, so treat it as a record of an outage rather than a warning
+            during one.
+
+      - alert: PrometheusSelfScrapeFailing
+        expr: up{job="prometheus"} == 0
+        for: 10m
+        labels: { severity: amber }
+        annotations:
+          summary: "Prometheus cannot scrape itself"
+          detail: >-
+            The process is running, since these rules are still being
+            evaluated, but its own metrics endpoint is not answering.
+
+      - alert: GrafanaDown
+        expr: up{job="grafana"} == 0
+        for: 15m
+        labels: { severity: amber }
+        annotations:
+          summary: "Grafana is not answering"
+          detail: >-
+            Dashboards are unavailable. Alerting is unaffected, which is why
+            this is amber.
+
+      - alert: MonitorDiskCritical
+        expr: |
+          (node_filesystem_avail_bytes{job="monitor-host",mountpoint="/"}
+           / node_filesystem_size_bytes{job="monitor-host",mountpoint="/"}) < 0.08
+        for: 30m
+        labels: { severity: red }
+        annotations:
+          summary: "The monitor itself is nearly out of disk"
+          detail: >-
+            Under 8% free on the xxOps monitor. If this fills, Prometheus stops
+            recording and every alert for the other hosts goes quiet without
+            anything saying so.
+
+      - alert: MonitorDiskFilling
+        expr: |
+          (node_filesystem_avail_bytes{job="monitor-host",mountpoint="/"}
+           / -deriv(node_filesystem_avail_bytes{job="monitor-host",mountpoint="/"}[7d])
+           / 86400) < 30
+          and
+          deriv(node_filesystem_avail_bytes{job="monitor-host",mountpoint="/"}[7d]) < -120
+        for: 1h
+        labels: { severity: amber }
+        annotations:
+          summary: "The monitor will run out of disk within 30 days"
+          detail: >-
+            Same projection the capacity banner uses. Usually the TSDB growing,
+            so check retention before the disk decides for you.
+  - name: xxops-wrapper
+    rules:
+      - alert: WrapperCommandVerifyBroken
+        expr: xx_wrapper_cmd_verify_ok == 0
+        for: 15m
+        labels:
+          severity: amber
+        annotations:
+          summary: "{{ $labels.instance }} cannot verify signed management commands"
+          description: >-
+            The xx wrapper on {{ $labels.instance }} cannot verify the signature
+            on command.jsonl, so it will silently ignore signed management
+            commands including pushed binary updates. The service itself keeps
+            running normally, which is why nothing else reports a fault. Cause
+            is almost always pyOpenSSL 24.3 or later, which removed
+            OpenSSL.crypto.verify. Fix: as the service user on that host, run
+            pip3 install --user 'pyopenssl<24.3' then restart the service.
+            Check xx_pyopenssl_version_info for the installed version.
+
+  - name: xxops-storage
+    rules:
+      - alert: ProducerStalledHostReachable
+        expr: |
+          (time() - xx_textfile_producer_last_run > 600)
+          and on(instance) (max by (instance) (up) == 1)
+        for: 10m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $labels.instance }} is reachable but has stopped producing metrics"
+          description: >-
+            Scrapes are still succeeding, so the host is up and the network is
+            fine - but the metrics producer has not written a new timestamp in
+            over ten minutes. Two things cause this and one of them is
+            serious. The producer may simply have died, which is a stopped
+            timer and a two-minute fix. Or THE HOST MAY NO LONGER BE ABLE TO
+            WRITE TO DISK: the producer writes a temp file and moves it into
+            place, so a read-only root stops it dead while node_exporter and
+            Alloy carry on serving from memory and look healthy. That is
+            exactly what happened when a node's EXT4 root went read-only - the
+            producer froze one minute before the last kernel log, and every
+            other check still read green. CHECK FIRST whether the root
+            filesystem is still writable (`findmnt -no OPTIONS /` should say
+            rw) and whether the kernel is reporting I/O errors. If it is
+            read-only, do NOT remount it rw - that can make corruption worse.
+            Capture evidence and plan a controlled reboot. If the filesystem
+            is fine, check the xxops-textfile timer.
+
+  - name: xxops-network
+    rules:
+      - alert: PathMtuTooSmall
+        expr: xx_path_mtu_ok == 0
+        for: 30m
+        labels: { severity: amber }
+        annotations:
+          summary: "{{ $labels.instance }} cannot send full-size packets"
+          description: >-
+            This host is configured for an MTU its network path will not
+            carry. Small packets cross and large ones are dropped upstream,
+            and the ICMP that would trigger Path MTU Discovery is usually
+            filtered - so nothing corrects it and large transfers die partway
+            through while the host looks healthy in every other respect.
+            Found on PPPoE sites where the path carries 1492 against a
+            configured 1500. Find the real limit with `ping -M do -s <size>`
+            walking down from 1472, then set it on the connection - on
+            NetworkManager hosts that is `nmcli con mod "Wired connection 1"
+            802-3-ethernet.mtu <value>`, since netplan is only a stub there.
+            patches/path-mtu-fix.py does the whole measurement and change in
+            one step.
+
+  - name: xxops-storage-health
+    rules:
+      - alert: StorageRootReadOnly
+        expr: xx_storage_root_writable == 0
+        for: 2m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $labels.instance }} can no longer write to its own disk"
+          description: >-
+            The root filesystem has been remounted read-only, which the kernel
+            does when it hits I/O or journal errors it cannot recover from.
+            Services will start failing, and SSH usually goes with them within
+            minutes - so this is the window in which you can still get in.
+            DO NOT REMOUNT IT READ-WRITE. That can turn a recoverable
+            filesystem into a corrupt one. Capture what you can - `dmesg -T |
+            tail -50`, the NVMe or SMART state, which services are still
+            alive - then plan a controlled reboot, which is what recovers it
+            by replaying the journal. Expect to need physical or console
+            access if SSH has already gone.
+
+      - alert: NvmeControllerNotLive
+        expr: xx_nvme_controller_live == 0
+        for: 5m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $labels.instance }}: the NVMe controller is not live"
+          description: >-
+            The kernel no longer reports this controller as live - it may be
+            resetting, or it may have dropped off the PCIe bus. Filesystem
+            errors usually follow. Check `dmesg -T` for nvme resets, timeouts
+            or PCIe AER messages.
+
+      - alert: NvmeCriticalWarning
+        expr: xx_nvme_critical_warning > 0
+        for: 15m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $labels.instance }}: the SSD is reporting a critical warning"
+          description: >-
+            The drive's own SMART critical warning field is non-zero, meaning
+            it is reporting a problem about itself - spare capacity below
+            threshold, temperature out of range, media in read-only mode, or
+            volatile memory backup failure. Read the full SMART log to see
+            which: `nvme smart-log <device>`.
+
+      - alert: NvmeMediaErrors
+        expr: increase(xx_nvme_media_errors[24h]) > 0
+        for: 5m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $labels.instance }}: the SSD has logged new media errors"
+          description: >-
+            Media errors are uncorrectable read or write failures - actual
+            data the drive could not deliver. A drive that has sat at zero and
+            then moves is telling you something. The absolute count matters
+            far less than the fact it changed, which is why this alerts on the
+            increase. Plan a replacement rather than waiting to see how far it
+            goes.
+
+      - alert: NvmeErrorLogGrowing
+        expr: increase(xx_nvme_error_log_entries[24h]) > 0
+        for: 30m
+        labels: { severity: amber }
+        annotations:
+          summary: "{{ $labels.instance }}: NVMe error-log entries are increasing"
+          description: >-
+            Context rather than a fault. This counter includes benign command
+            errors - one host sits in the high hundreds with zero media errors
+            and always has. Amber on purpose, so it shows in the app and the
+            daily digest without paging. It is worth attention only alongside
+            something else: media errors moving, a critical warning, or a
+            controller reset.
+            
+      - alert: NodeLinkSlow
+        expr: |
+          max by (instance) (
+            max_over_time(
+              (
+                xx_linkspeed_up_mbps{mode="capacity"}
+                and on(instance) xx_linkspeed_path_direct{mode="capacity"} == 1
+              )[14d:5m]
+            )
+          ) < 100
+          and on(instance)
+          count by (instance) (xx_linkspeed_up_mbps{mode="capacity"} offset 3d)
+        for: 30m
+        labels: { severity: amber }
+        annotations:
+          summary: "{{ $labels.instance }} link is slow - best 14d upload {{ $value | printf \"%.0f\" }} Mbps"
+          detail: >-
+            This is the BEST this node has managed against any peer over 14
+            days and at least three days of readings, on a direct path, so it
+            is not one bad partner or a relayed
+            measurement. Confirm with yabs on the node before treating it as a
+            fault: a node can simply be on a slower plan, which is not
+            something monitoring can fix.
+
+      - alert: NodeLinkUnmeasurable
+        expr: |
+          (
+            count by (instance) (xx_linkspeed_up_mbps{mode="capacity"})
+            unless
+            count by (instance) (
+              max_over_time(
+                (
+                  xx_linkspeed_up_mbps{mode="capacity"}
+                  and on(instance) xx_linkspeed_path_direct{mode="capacity"} == 1
+                )[14d:5m]
+              )
+            )
+          )
+        for: 6h
+        labels: { severity: amber }
+        annotations:
+          summary: "{{ $labels.instance }} has no direct link measurement in 14 days"
+          detail: >-
+            Every capacity test on this node has gone over a Tailscale DERP
+            relay, which caps around 20-30 Mbps and measures the relay rather
+            than the link. THE LINK ITSELF MAY BE PERFECTLY FINE - a node in
+            this state has read 22 Mbps here and 878 Mbps to a public server.
+            It means Tailscale cannot NAT-traverse from this node to any peer. cMix is
+            unaffected; enabling UPnP on the router usually fixes it.

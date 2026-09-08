@@ -1,0 +1,579 @@
+
+<!DOCTYPE html>
+<html lang="en" data-theme="night">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#0d1017">
+<link rel="apple-touch-icon" href="/icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="xxOps">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<title>xxOps</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@450;600&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/xxops.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="mark"><i></i>xxOps</div><div class="spacer"></div>
+    <div class="ask" id="askWrap">
+      <input id="ask" placeholder="Search fixes, hosts, alerts…" autocomplete="off">
+      <div class="askres" id="askRes" hidden></div>
+    </div>
+    <button class="upd" id="upd" title="A newer version is ready">Update</button><button class="ib" id="theme" aria-label="Day or night" style="display:none">☾</button>
+    <div class="who" id="whoBtn" role="button" tabindex="0" aria-label="Account"><div class="av" id="av">BZ</div>
+      <div class="wt"><div class="wn" id="wn">Operator</div><div class="wr" id="wrole">Fleet owner</div></div></div>
+    <button class="ib" id="gear" aria-label="Settings">⚙</button>
+  </header>
+
+  <div class="menuwrap" id="menuWrap" hidden>
+    <div class="menuback" id="menuBack"></div>
+    <nav class="menu" id="menu" aria-label="Account">
+      <div class="mhead">
+        <div class="av" id="mav">BZ</div>
+        <div><div class="mname" id="mname">Operator</div>
+             <div class="msub" id="mrole">Fleet owner</div></div>
+      </div>
+      <button class="mi" id="miSettings"><span>Settings</span></button>
+      <button class="mi" id="miTheme"><span>Appearance</span><em id="miThemeVal">Night</em></button>
+      <a class="mi" id="miDocs" href="/docs"><span>Documentation</span></a>
+      <button class="mi mdanger" id="miOut" hidden><span>Sign out</span></button>
+    </nav>
+  </div>
+
+  <section class="verdict">
+    <h1 class="headline" id="headline">Finding your fleet…</h1>
+    <div class="counts">
+      <button class="pill" data-pill="steady"><i class="dot d1"></i><b id="c1">–</b> steady</button>
+      <button class="pill" data-pill="recovering"><i class="dot d2"></i><b id="c2">–</b> recovering</button>
+      <button class="pill" data-pill="down"><i class="dot d3"></i><b id="c3">–</b> down</button>
+      <button class="pill" data-pill="offline"><i class="dot d4"></i><b id="c4">–</b> offline</button>
+      <button class="pill" data-pill="notearning"><i class="dot d5"></i><b id="c5">–</b> not earning</button>
+      <span class="stamp" id="stamp"></span>
+    </div>
+    <div id="banners"></div>
+  </section>
+
+  <nav class="nav" role="tablist">
+    <button class="nb" role="tab" data-v="att" aria-selected="true">Needs attention <span id="n-att">0</span></button>
+    <button class="nb" role="tab" data-v="val" aria-selected="false">Validators <span id="n-val">0</span></button>
+    <button class="nb" role="tab" data-v="host" aria-selected="false">Hosts <span id="n-host">0</span></button>
+    <button class="nb" role="tab" data-v="inc" aria-selected="false">Incidents</button>
+    <button class="nb" role="tab" data-v="chg" aria-selected="false">Changes <span id="n-chg">0</span></button>
+    <button class="nb" role="tab" data-v="fix" aria-selected="false">Fixes <span id="n-fix">0</span></button>
+    <button class="nb" role="tab" data-v="rank" aria-selected="false">Ranking</button>
+    <button class="nb" role="tab" data-v="cmd" id="tab-cmd" aria-selected="false" hidden>Commands</button>
+  </nav>
+
+  <div id="view"></div>
+  <div class="foot"><span id="f1"></span><span id="f2"></span></div>
+</div>
+<div id="drawer"></div>
+
+<script src="/xxops-util.js"></script>
+<script src="/xxops-am.js"></script>
+<script src="/xxops-search.js"></script>
+<script src="/xxops-commands.js"></script>
+<script src="/xxops-settings.js"></script>
+<script src="/xxops-views.js"></script>
+<script src="/xxops-data.js"></script>
+<script>
+const VERSION="v3.17";
+const DEF={name:"Operator",avatar:null,diskDays:30,alertmgr:"",prom:location.origin.replace(/:\d+$/,":9090"),
+           stall:240,disk:85,logGb:2,lag:30,pairs:null,ignore:[]};
+const store={get:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}},
+             set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+let cfg=Object.assign({},DEF,store.get("xxops.cfg",{}));
+let cfgLoaded=false;
+async function loadCfg(){
+  try{
+    const r=await fetch("/api/settings",{cache:"no-store"});
+    if(r.ok){
+      const d=await r.json();
+      if(d && d.pairs && Object.keys(d.pairs).length) cfg=Object.assign({},DEF,d);
+      else if(cfg.pairs && Object.keys(cfg.pairs).length) saveCfg();
+    }
+  }catch(e){}
+  cfgLoaded=true;
+}
+async function saveCfg(){
+  store.set("xxops.cfg",cfg);
+  try{ await fetch("/api/settings",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify(cfg)}); }catch(e){}
+}
+let view="att",rows=[],hosts=[],specs={},prev={},demo=false,incRange="24h",incidents=[],
+    ranking=null, rankLoaded=false,
+    silences=[],amUp=false,amInfo=null,valOpen=false,appHash=null,pillFilter=null,
+    muting=null,
+    checking=null, checkOut={},
+    pendingAct=null, actBusy=false,
+    fixes=[], fixLoaded=false, fixOpen=null, fixAdding=false,
+    alerts=[],
+    changes=[],chgRange="24h",chgSeen=+(store.get("xxops.chgSeen",0)||0),chgLoaded=false,
+    notify=null,notifyMsg="",notifyOpen=false,contactOpen=null,pairState=null,pairTimer=null,
+    q$="",openRow=null,openHost=null,discovered=null,lastSpec=0,dismissed=store.get("xxops.dismiss",[]);
+
+/* ---------- utils ---------- */
+function collectNotify(){
+  if(!notify) return false;
+  const g=id=>document.getElementById(id);
+  if(!g("btok")) return false;            // the section is closed, nothing to read
+  notify.telegram.bot_token = g("btok").value.trim();
+  notify.smtp.host = g("smtph").value.trim();
+  notify.smtp.port = +g("smtpp").value || 587;
+  notify.smtp.from = g("smtpf").value.trim();
+  notify.smtp.username = g("smtpu").value.trim();
+  notify.smtp.password = g("smtpw").value;
+  notify.fallback.telegram_chat_id = g("fbtg").value.trim();
+  notify.fallback.emails = g("fbem").value.trim();
+  return true;
+}
+async function sendTest(){
+  notifyMsg = "Sending…"; paintSettings();
+  try{
+    const r = await fetch("/api/notify/test", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({})});
+    const d = await r.json();
+    notifyMsg = (d.ok ? "\u2713 " : "") + (d.message || "");
+  }catch(e){ notifyMsg = "Could not reach the server: " + e.message; }
+  paintSettings();
+}
+async function startPair(){
+  try{
+    const r = await fetch("/api/telegram/pair", {method:"POST"});
+    const d = await r.json();
+    if(!d.ok){ notifyMsg = d.error || "Could not start pairing."; return paintSettings(); }
+    pairState = {code:d.code, waiting:true};
+    clearInterval(pairTimer);
+    pairTimer = setInterval(pollPair, 3000);
+    paintSettings();
+    setTimeout(()=>{ if(pairState&&pairState.waiting){ clearInterval(pairTimer);
+      pairState=null; notifyMsg="Pairing timed out. Try again."; paintSettings(); } }, 600000);
+  }catch(e){ notifyMsg = e.message; paintSettings(); }
+}
+async function pollPair(){
+  try{
+    const r = await fetch("/api/telegram/pair", {cache:"no-store"});
+    const d = await r.json();
+    if(d.found){
+      clearInterval(pairTimer);
+      const c = notify.contacts.find(x=>x.id===contactOpen);
+      if(c){ c.telegram_chat_id = String(d.chat_id); if(!c.name && d.name) c.name = d.name; }
+      pairState = null;
+      notifyMsg = "\u2713 Paired" + (d.name ? " with " + d.name : "") + ". Save to apply.";
+      paintSettings();
+    }
+  }catch(e){}
+}
+
+/* ---------- alertmanager silences ---------- */
+function mutedAll(node){
+  const gw=(cfg.pairs||{})[node]||"";
+  return silences.filter(sl=>(sl.matchers||[]).some(m=>
+    m.name==="instance" && (m.value===node || m.value===gw ||
+      (m.isRegex && new RegExp("^("+m.value+")$").test(node)))));
+}
+function mutedFor(node){ return mutedAll(node)[0]; }
+function mutedScope(sl){
+  if(!sl) return "";
+  const m=(sl.matchers||[]).find(x=>x.name==="instance");
+  const v=m?m.value:"";
+  return v.indexOf("|")>=0 ? "Both halves" : v;
+}
+function refreshMuted(){
+  // rows carry muted state worked out at load time, so re-derive it here
+  // rather than waiting for the next tick to rebuild them
+  for(const r of rows){
+    const sl=mutedFor(r.node);
+    r.muted = sl ? sl.id : null;
+    r.mutedTo = sl ? sl.endsAt : null;
+    r.mutedWhat = mutedScope(sl);
+  }
+}
+async function expireSilence(id){
+  const r=await fetch("/api/silence/expire",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify({id})});
+  const d=await r.json();
+  if(!d.ok) throw new Error(d.message||"the server refused");
+}
+async function mute(node,hours){
+  const gw=(cfg.pairs||{})[node]||"";
+  const now=new Date(), end=new Date(now.getTime()+hours*3600*1000);
+  // backdate a little so clock skew between this device and the monitor
+  // cannot leave the silence pending and therefore invisible
+  const start=new Date(now.getTime()-60000);
+  const sel=document.querySelector(`[data-msel="${node}"]`);
+  const scope=(sel&&sel.value)||(gw?"gw":"node");
+  const value = scope==="node" ? node : scope==="gw" ? (gw||node)
+              : (gw?`${node}|${gw}`:node);
+  const isRe  = scope==="both" && !!gw;
+  muting=node; render();            // say something immediately
+  try{
+    // replace any existing silence for this validator rather than stacking one
+    for(const s of mutedAll(node)) await expireSilence(s.id);
+    const r=await fetch("/api/silence/create",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        matchers:[{name:"instance",value,isRegex:isRe,isEqual:true}],
+        startsAt:start.toISOString(), endsAt:end.toISOString(),
+        createdBy:cfg.name||"xxOps",
+        comment:`muted from xxOps for ${hours}h`})});
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.message||"the server refused");
+    await loadSilences();
+  }catch(e){ alert("Could not mute: "+e.message); }
+  muting=null; refreshMuted(); render();
+}
+async function unmute(id){
+  try{ await expireSilence(id); await loadSilences(); refreshMuted(); render(); }
+  catch(e){ alert("Could not unmute: "+e.message); }
+}
+async function runAction(){
+  const p = pendingAct;
+  if(!p) return;
+  actBusy = true; render();
+  try{
+    const r = await fetch("/api/agent/run",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({host:p.host, action:p.action, confirm:true})});
+    const d = await r.json();
+    if(!d.ok) throw new Error(d.message||"the server refused");
+    const res = d.result||{};
+    checkOut[p.node] = res.ok===false
+      ? `${p.host} refused: ${res.error||"unknown"}`
+      : `${p.host} \u00b7 ${p.action} \u00b7 exit ${res.exit}\n\n${(res.output||"").trim()||"done"}`;
+  }catch(e){ checkOut[p.node] = `could not run ${p.action}: ${e.message}`; }
+  actBusy = false; pendingAct = null; render();
+}
+
+async function runCheck(node, action){
+  const sel=document.querySelector(`[data-chksel="${node}"]`);
+  const target=(sel&&sel.value)||node;
+  checking=node; delete checkOut[node]; render();
+  try{
+    const r=await fetch("/api/agent/run",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({host:target,action})});
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.message||"the server refused");
+    const res=d.result||{};
+    checkOut[node] = res.ok===false
+      ? `${target} refused: ${res.error||"unknown"}`
+      : `${target} \u00b7 ${action}\n\n${(res.output||"").trim()||"(no output)"}`;
+  }catch(e){ checkOut[node] = `could not run ${action}: ${e.message}`; }
+  checking=null; render();
+}
+
+async function unmuteNode(node){
+  muting=node; render();
+  try{
+    for(const s of mutedAll(node)) await expireSilence(s.id);
+    await loadSilences();
+  }catch(e){ alert("Could not unmute: "+e.message); }
+  muting=null; refreshMuted(); render();
+}
+
+/* ---------- theme + nav + loop ---------- */
+const root=document.documentElement,tb=document.getElementById("theme");
+const setTheme=t=>{root.dataset.theme=t;tb.textContent=t==="night"?"☾":"☀";store.set("xxops.theme",t)};
+setTheme(store.get("xxops.theme","night"));
+tb.onclick=()=>setTheme(root.dataset.theme==="night"?"day":"night");
+
+/* ---------- account panels ---------- */
+let acct=null, totpNew=null, recoveryShown=null;
+
+async function aget(path){
+  try{
+    const r = await fetch(path, {cache: "no-store"});
+    return await r.json();
+  }catch(e){ return {ok:false, message:"The server did not answer."}; }
+}
+
+async function apost(path, body){
+  try{
+    const r = await fetch(path, {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(body||{})});
+    return await r.json();
+  }catch(e){ return {ok:false, message:"The server did not answer."}; }
+}
+
+async function loadAcct(){
+  const d = await apost("/api/auth/state");
+  acct = (d && d.ok) ? d : null;
+  const ctab = document.getElementById("tab-cmd");
+  if(ctab) ctab.hidden = !(acct && acct.role === "owner");
+  if(document.getElementById("acctMsg")) openSettings();
+  return acct;
+}
+
+function acctPanel(){
+  if(!acct) return '<div class="grp"><h3>Password</h3>'+
+    '<div class="note">Checking your account\u2026</div></div>';
+
+  if(recoveryShown){
+    return '<div class="grp"><h3>Recovery codes</h3>'+
+      '<div class="note">Save these somewhere safe now. Each one signs you in once '+
+      'if you lose your authenticator, and they are not shown again.</div>'+
+      '<div class="rcodes">'+recoveryShown.map(c=>'<code>'+esc(c)+'</code>').join('')+'</div>'+
+      '<div class="tools"><button class="btn" id="rcDone">I have saved them</button>'+
+      '<button class="btn ghost" id="rcCopy">Copy all</button></div>'+
+      '<div class="note amsg" id="tfaMsg" hidden></div></div>';
+  }
+
+  let tfa;
+  if(totpNew){
+    const pretty = (totpNew.secret.match(/.{1,4}/g)||[]).join(" ");
+    tfa = '<div class="note">Scan this with Google Authenticator or Authy. If you would '+
+      'rather type it in, the key is underneath. Nothing changes until the code checks out.</div>'+
+      (totpNew.svg ? '<div class="qr">'+totpNew.svg+'</div>' : '')+
+      '<div class="tfasec">'+esc(pretty)+'</div>'+
+      '<div class="tools" style="margin-bottom:6px">'+
+      '<button class="btn ghost" id="tfaCopy">Copy key</button>'+
+      '<a class="btn ghost tfalink" href="'+esc(totpNew.uri)+'">Open in app</a></div>'+
+      '<div class="fld"><label for="tfaCode">Six digit code</label>'+
+      '<input class="inp" id="tfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></div>'+
+      '<div class="tools"><button class="btn" id="tfaConfirm">Turn on two-factor</button>'+
+      '<button class="btn ghost" id="tfaCancel">Cancel</button></div>';
+  } else if(acct.totp){
+    tfa = '<div class="note">Two-factor is on. You need a code from your authenticator '+
+      'each time you sign in.</div>'+
+      '<div class="fld"><label for="tfaPw">Confirm your password to turn it off</label>'+
+      '<input class="inp" type="password" id="tfaPw" autocomplete="current-password"></div>'+
+      '<div class="tools"><button class="btn ghost" id="tfaOff">Turn off two-factor</button></div>';
+  } else {
+    tfa = '<div class="note">Your fleet is behind a password alone. Two-factor adds a '+
+      'six digit code from your phone.</div>'+
+      '<div class="tools"><button class="btn" id="tfaOn">Set up two-factor</button></div>';
+  }
+
+  return '<div class="grp"><h3>Password</h3>'+
+    '<div class="fld"><label for="pwCur">Current password</label>'+
+    '<input class="inp" type="password" id="pwCur" autocomplete="current-password"></div>'+
+    '<div class="fld"><label for="pwNew">New password</label>'+
+    '<input class="inp" type="password" id="pwNew" autocomplete="new-password"></div>'+
+    '<div class="fld"><label for="pwAgain">New password again</label>'+
+    '<input class="inp" type="password" id="pwAgain" autocomplete="new-password"></div>'+
+    '<div class="tools"><button class="btn" id="pwSave">Change password</button></div>'+
+    '<div class="note amsg" id="acctMsg" hidden></div></div>'+
+    '<div class="grp"><h3>Two-factor</h3>'+tfa+
+    '<div class="note amsg" id="tfaMsg" hidden></div></div>';
+}
+
+function say(id, text, bad){
+  const m = document.getElementById(id);
+  if(!m) return;
+  m.hidden = false;
+  m.textContent = text;
+  m.classList.toggle("bad", !!bad);
+}
+
+document.getElementById("drawer").addEventListener("click", async e=>{
+  const t = e.target.closest("button");
+  if(!t || !t.id) return;
+
+  if(t.id === "pwSave"){
+    const cur=document.getElementById("pwCur").value;
+    const nw =document.getElementById("pwNew").value;
+    const ag =document.getElementById("pwAgain").value;
+    if(nw !== ag) return say("acctMsg","Those passwords do not match.",1);
+    if(nw.length < 8) return say("acctMsg","Use at least 8 characters.",1);
+    say("acctMsg","Saving\u2026");
+    const d = await apost("/api/auth/password",{current:cur,new:nw});
+    if(!d.ok) return say("acctMsg", d.message || "That did not work.", 1);
+    document.getElementById("pwCur").value="";
+    document.getElementById("pwNew").value="";
+    document.getElementById("pwAgain").value="";
+    say("acctMsg","Password changed.");
+  }
+
+  else if(t.id === "tfaOn"){
+    const d = await apost("/api/auth/totp/start");
+    if(!d.ok) return say("tfaMsg", d.message || "That did not work.", 1);
+    totpNew = d; openSettings();
+  }
+
+  else if(t.id === "tfaCancel"){ totpNew = null; openSettings(); }
+
+  else if(t.id === "tfaCopy"){
+    try{ await navigator.clipboard.writeText(totpNew.secret);
+         say("tfaMsg","Key copied."); }
+    catch(err){ say("tfaMsg","Select the key and copy it by hand.",1); }
+  }
+
+  else if(t.id === "tfaConfirm"){
+    const code = (document.getElementById("tfaCode").value||"").trim();
+    say("tfaMsg","Checking\u2026");
+    const d = await apost("/api/auth/totp/confirm",{code:code});
+    if(!d.ok) return say("tfaMsg", d.message || "That code is not right.", 1);
+    totpNew = null; recoveryShown = d.recovery || [];
+    await loadAcct(); openSettings();
+  }
+
+  else if(t.id === "tfaOff"){
+    const pw = document.getElementById("tfaPw").value;
+    say("tfaMsg","Checking\u2026");
+    const d = await apost("/api/auth/totp/disable",{password:pw});
+    if(!d.ok) return say("tfaMsg", d.message || "That did not work.", 1);
+    await loadAcct(); openSettings();
+  }
+
+  else if(t.id === "rcDone"){ recoveryShown = null; openSettings(); }
+
+  else if(t.id === "rcCopy"){
+    try{ await navigator.clipboard.writeText(recoveryShown.join("\n"));
+         say("tfaMsg","Copied."); }
+    catch(err){ say("tfaMsg","Select and copy them by hand.",1); }
+  }
+});
+
+loadAcct();
+
+/* ---------- invites ---------- */
+let inviteState = null;
+
+document.getElementById("drawer").addEventListener("click", async e=>{
+  const b = e.target.closest("button[data-invite]");
+  if(!b) return;
+  e.stopPropagation();
+  const cid = b.dataset.invite;
+  inviteState = {contactId: cid, pending: true};
+  paintSettings();
+  const d = await apost("/api/users/invite", {contactId: cid});
+  inviteState = d && d.ok
+    ? {contactId: cid, code: d.code, sent: !!d.sent, name: d.name}
+    : {contactId: cid, error: /no such contact/i.test((d&&d.message)||"")
+        ? "Save settings first \u2014 this contact has not been saved yet."
+        : ((d && d.message) || "That did not work.")};
+  paintSettings();
+});
+
+/* ---------- account menu ---------- */
+const menuWrap=document.getElementById("menuWrap");
+let authOn=null;
+async function probeAuth(){
+  if(authOn!==null) return authOn;
+  try{
+    const r=await fetch("/api/auth/state",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:"{}"});
+    if(r.ok){ const d=await r.json();
+      authOn=!!(d.authRequired||d.auth_required); return authOn; }
+  }catch(e){}
+  authOn=true;   /* endpoint absent = single-password build, where auth is on */
+  return authOn;
+}
+function paintMenu(){
+  document.getElementById("miThemeVal").textContent =
+    root.dataset.theme==="night" ? "Night" : "Day";
+  /* whoName(), not cfg.name - cfg is the owner's settings file, and a
+     contact must see themselves here as they do in the header */
+  try{ document.getElementById("mname").textContent = whoName(); }catch(e){}
+  const a=document.getElementById("av"), m=document.getElementById("mav");
+  if(a && m) m.innerHTML = a.innerHTML;
+}
+async function openMenu(){
+  paintMenu();
+  document.getElementById("miOut").hidden = !(await probeAuth());
+  menuWrap.hidden=false;
+}
+function closeMenu(){ menuWrap.hidden=true; }
+const whoBtn=document.getElementById("whoBtn");
+whoBtn.onclick=openMenu;
+whoBtn.onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); openMenu(); } };
+document.getElementById("menuBack").onclick=closeMenu;
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeMenu(); });
+document.getElementById("miSettings").onclick=async()=>{
+  closeMenu();
+  loadAcct();
+  if(!notify) await loadNotifyCfg();
+  openSettings();
+};
+document.getElementById("miTheme").onclick=()=>{
+  setTheme(root.dataset.theme==="night"?"day":"night");
+  paintMenu();
+};
+document.getElementById("miOut").onclick=async()=>{
+  try{ await fetch("/api/auth/logout",{method:"POST"}); }catch(e){}
+  location.reload();
+};
+document.getElementById("upd").onclick=()=>location.reload();
+document.querySelectorAll("[data-pill]").forEach(b=>b.onclick=()=>{
+  const p=b.dataset.pill;
+  if(view==="pill" && pillFilter===p){ view=null; pillFilter=null; }
+  else { view="pill"; pillFilter=p; }
+  openRow=null; openHost=null;
+  document.querySelectorAll(".nb").forEach(x=>x.setAttribute("aria-selected","false"));
+  document.querySelectorAll("[data-pill]").forEach(x=>
+    x.classList.toggle("on", view==="pill" && x.dataset.pill===pillFilter));
+  render();
+});
+document.querySelectorAll(".nb").forEach(b=>b.onclick=()=>{
+  view = (view===b.dataset.v) ? null : b.dataset.v; openRow=null; openHost=null; pillFilter=null;
+  document.querySelectorAll("[data-pill]").forEach(x=>x.classList.remove("on"));
+  document.querySelectorAll(".nb").forEach(x=>x.setAttribute("aria-selected", x.dataset.v===view));
+  if(view==="inc"&&!incidents.length) loadIncidents();
+  if(view==="fix"&&!fixLoaded) loadFixes();
+  // Range queries over 24h on every host - heavier than the poll,
+  // so load once when the tab is opened rather than on the tick.
+  if(view==="rank"&&!rankLoaded) loadRanking();
+  if(view==="chg"){ if(!chgLoaded) loadChanges();
+    chgSeen=Math.floor(Date.now()/1000); store.set("xxops.chgSeen",chgSeen); }
+  render();
+});
+function showUpdated(v){
+  const t=document.createElement("div");
+  t.textContent = v ? ("Updated \u00b7 "+v) : "Updated";
+  t.setAttribute("style","position:fixed;left:50%;transform:translateX(-50%);"+
+    "bottom:22px;z-index:9999;background:var(--brand);color:#fff;"+
+    "font-family:inherit;font-size:13px;font-weight:500;padding:9px 15px;"+
+    "border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.35);cursor:pointer;"+
+    "opacity:0;transition:opacity .25s");
+  t.onclick=()=>t.remove();
+  document.body.appendChild(t);
+  requestAnimationFrame(()=>{ t.style.opacity="1"; });
+  setTimeout(()=>{ t.style.opacity="0"; setTimeout(()=>t.remove(),300); },6000);
+}
+async function checkVersion(){
+  try{
+    const r=await fetch("/api/version",{cache:"no-store"});
+    if(!r.ok) return;
+    const d=await r.json();
+    if(!d.hash) return;
+    if(appHash===null){
+      appHash=d.hash;
+      try{
+        const seenHash=store.get("xxops.appHash", null);
+        if(seenHash && seenHash!==d.hash) showUpdated(d.version||"");
+        store.set("xxops.appHash", d.hash);
+      }catch(e){}
+      return;
+    }
+    if(d.hash!==appHash) document.getElementById("upd").classList.add("on");
+  }catch(e){}
+}
+async function tick(){ await Promise.all([loadSilences(),loadAlertmanager(),loadAlerts(),checkVersion()]);
+  if(!fixLoaded) await loadFixes();
+  if(!chgLoaded) loadChanges();
+  rows=await load(); head(); render(); }
+/* Poll only while someone is looking.
+ *
+ * Every tick is ~15 Prometheus queries and a full re-render. In a background
+ * tab that is battery and data spent on a screen nobody can see.
+ *
+ * The first load is NOT gated: opening in a background tab should still
+ * populate, so returning to it shows a fleet rather than an empty page.
+ * Coming back triggers an immediate fetch, which makes the data FRESHER on
+ * return than it was before - previously you waited up to 30s for the next
+ * interval. */
+loadCfg().then(()=>loadSpecs()).then(tick);
+setInterval(()=>{ if(!document.hidden) tick(); }, 30000);
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) tick(); });
+</script>
+</body>
+</html>
+
