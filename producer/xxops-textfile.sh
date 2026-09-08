@@ -205,12 +205,42 @@ if [ -n "$xxv_pid" ]; then
   if [ -n "$xxv_home" ]; then
     xxv_sp="$(ls -d "$xxv_home"/.local/lib/python3*/site-packages 2>/dev/null | head -1)"
   fi
-  xxv_ver="$(PYTHONPATH="$xxv_sp" python3 -c 'import OpenSSL,sys; sys.stdout.write(OpenSSL.__version__)' 2>/dev/null)"
-  [ -z "$xxv_ver" ] && xxv_ver="unknown"
-  if PYTHONPATH="$xxv_sp" python3 -c 'import OpenSSL.crypto as c,sys; sys.exit(0 if hasattr(c,"verify") else 1)' 2>/dev/null; then
-    xxv_ok=1
-  else
-    xxv_ok=0
+  # RUN THE PROBE AS THE WRAPPER'S OWN USER, never as root.
+  #
+  # This script runs as root. $xxv_sp is the service account's ~/.local, a
+  # directory that account can WRITE. Importing from it as root meant anyone
+  # who could write there got root on the next run, every 60 seconds - a
+  # local privilege escalation, present even with --skip-agent.
+  #
+  # runuser drops to the account that already owns those files, so the
+  # import happens with no more privilege than the wrapper itself has. The
+  # environment tested is identical, which is the whole point of the check.
+  #
+  # If we cannot drop, we do not probe: xxv_ok stays -1 (unknown), the same
+  # value used when no wrapper is running. A gap in measurement is always
+  # better than a root import from a writable directory.
+  if command -v runuser >/dev/null 2>&1 && [ -n "$xxv_user" ] \
+     && [ "$xxv_user" != "root" ]; then
+    xxv_ver="$(runuser -u "$xxv_user" -- env PYTHONPATH="$xxv_sp" python3 -c \
+      'import OpenSSL,sys; sys.stdout.write(OpenSSL.__version__)' 2>/dev/null)"
+    [ -z "$xxv_ver" ] && xxv_ver="unknown"
+    if runuser -u "$xxv_user" -- env PYTHONPATH="$xxv_sp" python3 -c \
+       'import OpenSSL.crypto as c,sys; sys.exit(0 if hasattr(c,"verify") else 1)' \
+       2>/dev/null; then
+      xxv_ok=1
+    else
+      xxv_ok=0
+    fi
+  elif [ "$xxv_user" = "root" ]; then
+    # A wrapper genuinely running as root has its deps in root-owned paths,
+    # so there is nothing to drop to and nothing untrusted to import.
+    xxv_ver="$(python3 -c 'import OpenSSL,sys; sys.stdout.write(OpenSSL.__version__)' 2>/dev/null)"
+    [ -z "$xxv_ver" ] && xxv_ver="unknown"
+    if python3 -c 'import OpenSSL.crypto as c,sys; sys.exit(0 if hasattr(c,"verify") else 1)' 2>/dev/null; then
+      xxv_ok=1
+    else
+      xxv_ok=0
+    fi
   fi
 fi
 emit "xx_wrapper_cmd_verify_ok $xxv_ok"
