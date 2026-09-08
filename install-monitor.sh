@@ -77,17 +77,7 @@ done
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '  %s\n' "$*"; }
-die()  { printf 'REFUSING: %s\  if [ -f /etc/xxops/setup_token ]; then
-    say ""
-    say "  YOUR SETUP CODE:  $(cat /etc/xxops/setup_token)"
-    say ""
-    say "  You need this once, to create the first account. It stops anyone"
-    say "  else who can reach this machine claiming it before you do. It is"
-    say "  in /etc/xxops/setup_token if this scrolls away, and it is deleted"
-    say "  the moment your account exists."
-    say ""
-  fi
-n' "$*" >&2; exit 1; }
+die()  { printf 'REFUSING: %s\n' "$*" >&2; exit 1; }
 
 # --- checks that must pass before we describe a plan at all -----------------
 
@@ -420,6 +410,16 @@ else
   say "  systemctl status xxops-app"
   say "  journalctl -u xxops-app -n 30"
   exit 1
+fi
+
+if [ -f /etc/xxops/setup_token ]; then
+  echo ""
+  echo "  YOUR SETUP CODE:  $(cat /etc/xxops/setup_token)"
+  echo ""
+  echo "  You need this once, to create the first account. It stops anyone"
+  echo "  else who can reach this machine claiming it before you do."
+  echo "  It is in /etc/xxops/setup_token if this scrolls away, and it is"
+  echo "  deleted the moment your account exists."
 fi
 
 cat <<NEXT

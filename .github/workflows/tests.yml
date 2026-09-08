@@ -35,6 +35,30 @@ jobs:
         # do not need them.
         run: python3 tests/run.py
 
+      - name: Shell scripts parse
+        # bash -n alone would NOT have caught the real bug here: a block of
+        # shell landed inside die()'s printf string, which is malformed but
+        # still valid shell. So also check that every function definition is
+        # a single line that ends where it should.
+        run: |
+          for f in install-monitor.sh agent/install.sh agent/uninstall.sh \
+                   fixes/xxops-host-install.sh backup/xxops-backup.sh; do
+            [ -f "$f" ] || continue
+            bash -n "$f" && echo "ok  $f"
+          done
+          python3 - <<'CHECK'
+          import sys
+          bad = []
+          for f in ("install-monitor.sh", "agent/install.sh"):
+              for n, line in enumerate(open(f), 1):
+                  if line.startswith(("die()", "say()")) and not line.rstrip().endswith("}"):
+                      bad.append("%s:%d %s" % (f, n, line.strip()[:60]))
+          if bad:
+              print("a one-line function is no longer one line:")
+              print("\n".join(bad)); sys.exit(1)
+          print("ok  helper functions are intact")
+          CHECK
+
       - name: App JavaScript tests
         # node is present on ubuntu-latest. If it ever is not, this step
         # should fail loudly rather than pass quietly - a skipped test that
