@@ -932,17 +932,30 @@ class H(BaseHTTPRequestHandler):
     MAX_BODY = 256 * 1024
 
     def _body(self):
+        """The parsed request body, or {} if there was not one.
+
+        Sets self._body_refused when something was DISCARDED rather than
+        absent - an oversized claim, an unreadable length, unparseable JSON.
+        The caller must tell those apart: returning {} for both meant an
+        oversized save answered 200 while the request was thrown away, which
+        is worse than the DoS the cap exists to stop.
+        """
+        self._body_refused = None
         try:
             n = int(self.headers.get("Content-Length") or 0)
         except ValueError:
+            self._body_refused = "that Content-Length is not a number"
             return {}
         if n < 0 or n > self.MAX_BODY:
+            self._body_refused = ("that request body is too large (%d bytes, "
+                                  "the limit is %d)" % (n, self.MAX_BODY))
             return {}
         if not n:
-            return {}
+            return {}          # genuinely no body, which is fine
         try:
             return json.loads(self.rfile.read(n))
         except Exception:
+            self._body_refused = "that request body is not valid JSON"
             return {}
 
     # ---- GET
@@ -1275,6 +1288,12 @@ class H(BaseHTTPRequestHandler):
     def _post(self):
         p = urllib.parse.urlparse(self.path).path
         body = self._body()
+        # A body that was discarded must not look like a body that was empty.
+        # Checked here, once, so every route is covered without any route
+        # having to remember.
+        if getattr(self, "_body_refused", None):
+            return self._send(413, {"ok": False,
+                                    "message": self._body_refused})
       
         if self._gate(p):
             return
