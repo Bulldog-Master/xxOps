@@ -1159,10 +1159,25 @@ class H(BaseHTTPRequestHandler):
                     return self._send(200, f.read().decode(), "text/html; charset=utf-8")
             except FileNotFoundError:
                 return self._send(404, "xxops.html not found", "text/plain")
-        # the GET side of the api is gated here. _gate() only covers _post,
+        # The GET side of the api is gated here. _gate() only covers _post,
         # so without this every /api/ GET answered anyone on the tailnet.
-        # enforced only when auth is on, so a fresh install can still set up.
-        if (auth_required() and p.startswith("/api/")
+        #
+        # THIS USED TO BE CONDITIONAL ON auth_required(), which is
+        # `not needs_setup()` - false while no account exists. So between
+        # installing a monitor and creating the first account, EVERY
+        # owner-only GET was open to anything that could reach the port,
+        # including /api/enroll-token, which authenticates the manifest that
+        # verifies every file installed on a validator host.
+        #
+        # The intent was that a fresh install can still set up. It still can:
+        # setup needs /api/auth/*, and the login page needs /api/health and
+        # /api/version, and all three are exempt by name on the lines below
+        # for their own reasons. The condition protected nothing and opened
+        # everything else.
+        #
+        # With no owner there is no session, so these now refuse - which is
+        # right. A monitor nobody has claimed should not hand out a token.
+        if (p.startswith("/api/")
                 and not p.startswith("/api/auth/")
                 and p not in ("/api/health", "/api/version")):
             _me = self._whoami()
