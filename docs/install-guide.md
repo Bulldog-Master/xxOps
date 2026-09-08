@@ -285,6 +285,21 @@ backup ships to machines that key commands.
 1. Open the app at **`http://<MONITOR-IP>:8080`** — the same address you have
    been using, on port 8080. With no account it walks you through creating one.
 
+   **It asks for a setup code.** The installer printed it a moment ago, just
+   above the numbered steps; if that has scrolled away it is in
+   `/etc/xxops/setup_token` on the monitor:
+
+       sudo cat /etc/xxops/setup_token
+
+   It exists because until an account exists, anything that can reach port
+   8080 could create one — and the first account is the owner, permanently.
+   The code means that has to be *you*, not whoever else happens to be on the
+   network while you are still setting up.
+
+   It is used once and deleted. Do not go looking for it afterwards, and do
+   not confuse it with the **enrolment token** you meet in Part 3 — that one
+   is different, it lives in the app, and it is for hosts rather than people.
+
    **The device you open it on has to reach the monitor.** If your hosts are on
    a mesh VPN, so must the laptop, phone or tablet you are looking at it from —
    see [tailscale.md](tailscale.md). A device that is not on it gets
