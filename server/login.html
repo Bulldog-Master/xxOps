@@ -29,6 +29,9 @@ function render(){
       <div class="hint">lowercase letters, numbers, dot, dash or underscore</div>
       <div class="pwrap"><input id="p" type="password" placeholder="Password"><button type="button" class="peye" id="pe">show</button></div>
       <input id="p2" type="password" placeholder="Password again">
+      <input id="sc" placeholder="Setup code" autocapitalize="none">
+      <div class="hint">printed when the monitor was installed, and in
+        /etc/xxops/setup_token on that machine</div>
       <button id="go">Create account</button><div class="err" id="e"></div>`;
     $("go").onclick=doSetup;
     wireEye();
@@ -77,7 +80,8 @@ async function post(path,body){
 async function doSetup(){
   const u=$("u").value.trim(), p=$("p").value, p2=$("p2").value;
   if(p!==p2){ $("e").textContent="Those passwords do not match."; return; }
-  const [,d]=await post("/api/auth/setup",{username:u,password:p});
+  const [,d]=await post("/api/auth/setup",
+                        {username:u,password:p,setupToken:$("sc").value.trim()});
   if(d.ok) location.reload(); else $("e").textContent=d.message||"Could not create the account.";
 }
 async function doLogin(totp,recovery){

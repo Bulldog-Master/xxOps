@@ -224,6 +224,22 @@ import ipaddress
 AGENT_CACHE = os.environ.get("XXOPS_AGENT_CACHE", "/var/lib/xxops/agents.json")
 # Presented by an agent when it registers its address. Read fresh each time so
 # rotating it takes effect without a restart.
+# Presented once, by whoever installed this monitor, to create the first
+# account. Without it /api/auth/setup is open to anything that can reach port
+# 8080 until an owner exists, and the first caller wins permanently. Deleted
+# the moment an owner is created.
+SETUP_TOKEN_FILE = os.environ.get("XXOPS_SETUP_TOKEN",
+                                  "/etc/xxops/setup_token")
+
+
+def setup_token():
+    try:
+        with open(SETUP_TOKEN_FILE) as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+
 ENROLL_TOKEN_FILE = os.environ.get("XXOPS_ENROLL_TOKEN",
                                    "/etc/xxops/enroll_token")
 
@@ -1416,6 +1432,20 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/auth/setup":
             if not needs_setup():
                 return self._send(400, {"ok": False, "message": "an account already exists"})
+            # Whoever installed this monitor has the token; whoever else can
+            # reach the port does not. If no token file exists at all this is
+            # an older install that predates this check - allowed, so an
+            # upgrade does not strand someone mid-setup.
+            _want = setup_token()
+            if _want:
+                _got = str(body.get("setupToken", "") or "").strip()
+                _gb = _got.encode("utf-8", "surrogatepass")
+                _wb = _want.encode("utf-8", "surrogatepass")
+                if len(_gb) != len(_wb) or not hmac.compare_digest(_gb, _wb):
+                    return self._send(403, {"ok": False, "message":
+                        "That setup code is not right. It was printed when "
+                        "the monitor was installed, and is in "
+                        "/etc/xxops/setup_token on that machine."})
             u = str(body.get("username", "")).strip().lower()
             pw = str(body.get("password", ""))
             if not VALID_USER.fullmatch(u):
@@ -1426,6 +1456,13 @@ class H(BaseHTTPRequestHandler):
             store = load_users()
             store["users"][u] = {"role": "owner", "pw": hash_password(pw),
                                  "totp": None, "recovery": [], "created": int(time.time())}
+            # Used once. Nothing left on disk to steal, and it cannot be
+            # replayed - though needs_setup() would refuse a second call
+            # anyway.
+            try:
+                os.unlink(SETUP_TOKEN_FILE)
+            except OSError:
+                pass
             save_users(store)
             tok = new_session(u)
             b = json.dumps({"ok": True}).encode()

@@ -77,7 +77,17 @@ done
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '  %s\n' "$*"; }
-die()  { printf 'REFUSING: %s\n' "$*" >&2; exit 1; }
+die()  { printf 'REFUSING: %s\  if [ -f /etc/xxops/setup_token ]; then
+    say ""
+    say "  YOUR SETUP CODE:  $(cat /etc/xxops/setup_token)"
+    say ""
+    say "  You need this once, to create the first account. It stops anyone"
+    say "  else who can reach this machine claiming it before you do. It is"
+    say "  in /etc/xxops/setup_token if this scrolls away, and it is deleted"
+    say "  the moment your account exists."
+    say ""
+  fi
+n' "$*" >&2; exit 1; }
 
 # --- checks that must pass before we describe a plan at all -----------------
 
@@ -331,6 +341,17 @@ install -m 755 "$REPO/monitor/xxops-digest.py" /usr/local/bin/xxops-digest.py
 # The backup authenticates with this key. Generated whether or not you have
 # chosen destinations yet: an unused key costs nothing, and it means deciding
 # on backups later needs no archaeology about what was expected where.
+# The setup code. Presented once to create the first account, so that
+# whoever can reach port 8080 during installation cannot claim ownership of
+# this monitor before the operator does. Deleted as soon as an owner exists.
+if [ ! -f /etc/xxops/setup_token ] && [ ! -s "$STATE_DIR/auth.json" ]; then
+  install -d -m 755 /etc/xxops
+  ( umask 077; head -c 12 /dev/urandom | base64 | tr -d '/+=' \
+      > /etc/xxops/setup_token )
+  chown "$RUN_USER":"$RUN_USER" /etc/xxops/setup_token
+  chmod 600 /etc/xxops/setup_token
+fi
+
 # The enrolment token. An agent presents this once, when it registers its
 # address with the monitor, so that endpoint is not open to anything that can
 # reach port 8080. Root-only: it is shown through the app, which already
