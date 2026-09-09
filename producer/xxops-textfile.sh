@@ -268,8 +268,14 @@ if [ -n "$xxv_pid" ]; then
        'import OpenSSL.crypto as c,sys; sys.exit(0 if hasattr(c,"verify") else 1)' \
        2>/dev/null; then
       xxv_ok=1
-    else
+    elif runuser -u "$xxv_user" -- true 2>/dev/null; then
+      # runuser worked, so the probe really ran and really failed.
       xxv_ok=0
+    else
+      # runuser itself could not run - needs root, and this is not root.
+      # Unknown, not broken.
+      xxv_ok=-1
+      xxv_ver="unknown"
     fi
   elif [ -n "$xxv_user" ] && [ "$xxv_user" != "root" ]; then
     # We found a wrapper but cannot become its user - runuser needs root and
