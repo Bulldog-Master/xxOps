@@ -112,6 +112,13 @@ GWCFG=/opt/xxnetwork/config/gateway.yaml
 if [ -f "$GWCFG" ]; then
   naddr="$(sed -n "s/^cmixAddress:[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*$/\1/p" "$GWCFG")"
   nhost="${naddr%%:*}"; nport="${naddr##*:}"; nname="${nhost%%.*}"
+  # These become LABELS below, and they come from a file the
+  # validator account can write. One " makes the collector reject
+  # this whole file and every metric on this host disappears - the
+  # same reason cpu_model strips. A quote is not valid in a
+  # hostname, so nothing legitimate is lost.
+  nhost="$(printf '%s' "$nhost" | tr -d '"\\')"
+  nname="$(printf '%s' "$nname" | tr -d '"\\')"
   # A PORT IS A NUMBER. This value comes out of a config file the validator
   # account can write, and it used to be interpolated into a string that
   # `bash -c` evaluated - so a port of `1$(...)` ran as root every 60
@@ -165,7 +172,7 @@ if command -v nvidia-smi >/dev/null 2>&1; then
   idx=0
   nvidia-smi --query-gpu=name,temperature.gpu,utilization.gpu,memory.used,memory.total,power.draw,clocks.sm \
              --format=csv,noheader,nounits 2>/dev/null | while IFS="," read -r nm tp ut mu mt pw ck; do
-    nm="$(echo "$nm" | sed "s/^ *//;s/ *$//")"
+    nm="$(echo "$nm" | sed "s/^ *//;s/ *$//" | tr -d '"\\')"
     # Strip spaces without eval. These six come from nvidia-smi, so nothing
     # here is attacker-controlled - but an eval in a root script is the
     # pattern that produced both of this week's actual root bugs, and this
@@ -222,6 +229,8 @@ else
   xxdns_names="scheduling.mainnet.cmix.rip auth.mainnet.cmix.rip"
 fi
 for xxdns_n in $xxdns_names; do
+  # Operator-written file, emitted as a label. Same strip.
+  xxdns_n="$(printf '%s' "$xxdns_n" | tr -d '"\\')"
   xxdns_ip="$(getent ahostsv4 "$xxdns_n" 2>/dev/null | head -1 | cut -d" " -f1)"
   if printf "%s" "$xxdns_ip" | grep -qE "^([0-9]{1,3}[.]){3}[0-9]{1,3}$"; then
     emit "xx_dns_resolves{name=\"$xxdns_n\"} 1"
