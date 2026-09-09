@@ -42,6 +42,12 @@ the gateway — it works out which it is:
     curl -sL https://raw.githubusercontent.com/Bulldog-Master/xxOps/main/fixes/xxops-host-install.sh \
       | sudo bash -s -- --label <THIS-HOST-LABEL> --monitor <MONITOR-IP> --token <TOKEN>
 
+**That is a dry run.** It prints what it would do on that host and changes
+nothing. Read it, then run the same command again with `--apply` on the end:
+
+    curl -sL https://raw.githubusercontent.com/Bulldog-Master/xxOps/main/fixes/xxops-host-install.sh \
+      | sudo bash -s -- --label <THIS-HOST-LABEL> --monitor <MONITOR-IP> --token <TOKEN> --apply
+
 `--token` is your **enrolment token**, on the app's **Commands** tab. It is
 what puts the new hosts on that tab so you can run actions on them from the
 app. Leave it out and everything else still works — metrics, alerts, the lot —

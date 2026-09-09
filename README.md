@@ -56,8 +56,10 @@ Already running xxOps and adding another validator?
 **[docs/adding-a-validator.md](docs/adding-a-validator.md)** instead — the
 monitor is already done and you only touch the new hosts.
 
-Both installers print what they intend to do and change nothing until you pass
-`--apply`.
+The monitor installer and the host installer both print what they intend to
+do and change nothing until you pass `--apply`. Read the plan, then re-run
+with the flag. The agent installer, which the host installer calls for you,
+does not yet work this way.
 
 ## Security model
 

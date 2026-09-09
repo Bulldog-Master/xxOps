@@ -385,6 +385,18 @@ where you can see them:
       | sudo bash -s -- --label <THIS-HOST-LABEL> --monitor <MONITOR-IP> \
       --token <TOKEN>
 
+**That is a dry run**, the same as the monitor installer. It works out
+whether this host is a node or a gateway, checks it can reach the monitor,
+prints what it would do, and changes nothing. The plan reflects this
+particular host - it says so if Alloy is already installed, or if a
+watchdog or agent from an earlier run is going to be left alone.
+
+Read it, then add `--apply` to the same command:
+
+    curl -sL https://raw.githubusercontent.com/Bulldog-Master/xxOps/main/fixes/xxops-host-install.sh \
+      | sudo bash -s -- --label <THIS-HOST-LABEL> --monitor <MONITOR-IP> \
+      --token <TOKEN> --apply
+
 `--token` is your **enrolment token**, shown on the app's **Commands**
 tab - you opened the app in Part 2, and it is on that screen with this
 whole command already filled in. It does two things: it verifies the
