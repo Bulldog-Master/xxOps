@@ -271,6 +271,17 @@ if [ -n "$xxv_pid" ]; then
     else
       xxv_ok=0
     fi
+  elif [ -n "$xxv_user" ] && [ "$xxv_user" != "root" ]; then
+    # We found a wrapper but cannot become its user - runuser needs root and
+    # this collector is not root any more. That is NOT the same as "the
+    # signed-command path is broken", which is what 0 means and what fires
+    # WrapperCommandVerifyBroken. Say -1: cannot be measured.
+    #
+    # The check is therefore inert while the collector is unprivileged. It
+    # needs rebuilding somewhere that can still switch user - a decision, not
+    # a patch. Until then this must not cry wolf on every host.
+    xxv_ok=-1
+    xxv_ver="unknown"
   elif [ "$xxv_user" = "root" ]; then
     # A wrapper genuinely running as root has its deps in root-owned paths,
     # so there is nothing to drop to and nothing untrusted to import.

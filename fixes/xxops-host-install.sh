@@ -348,10 +348,16 @@ User=alloy
 Group=alloy
 ExecStart=/usr/local/bin/xxops-textfile.sh
 NoNewPrivileges=yes
-ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=yes
-ReadWritePaths=/var/lib/alloy/textfile
+# NO ProtectSystem. It made the filesystem read-only for this service, and
+# the storage check then reported the HOST's disk as read-only - a false
+# StorageRootReadOnly on every host, and a real check disabled, because a
+# genuinely read-only disk became indistinguishable from the sandbox.
+#
+# It was guarding against the collector writing somewhere unexpected, which
+# the unprivileged account already prevents: alloy owns almost nothing.
+# Redundant hardening that breaks working detection is not worth having.
 EOF
 
 cat > /etc/systemd/system/xxops-textfile.timer <<'EOF'
