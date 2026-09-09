@@ -29,6 +29,7 @@ MON=""
 ROLE=""
 TOKEN=""
 SKIP_AGENT=no
+PASSIVE=no
 
 usage() {
   cat >&2 <<'USAGE'
@@ -46,6 +47,11 @@ xxOps host install -- one node or gateway, one command.
 
   --role node|gateway  only if the automatic guess is wrong.
   --skip-agent         install metrics only, no command agent.
+  --passive            metrics only, AND remove a command agent or
+                       watchdog left by an earlier run. Implies
+                       --skip-agent. Use this to convert an existing
+                       install to monitoring-only - --skip-agent on
+                       its own never removes anything installed.
 
 It installs Grafana Alloy, the metric producer, the xxOps agent, a logrotate
 rule and a journal cap -- and on a gateway, the gossip watchdog.
@@ -60,6 +66,7 @@ while [ $# -gt 0 ]; do
     --role)       ROLE="${2:-}"; shift 2 ;;
     --token)      TOKEN="${2:-}"; shift 2 ;;
     --skip-agent) SKIP_AGENT=yes; shift ;;
+    --passive)    SKIP_AGENT=yes; PASSIVE=yes; shift ;;
     -h|--help)    usage ;;
     *) echo "unknown option: $1" >&2; echo "" >&2; usage ;;
   esac
@@ -423,11 +430,24 @@ elif [ "$ROLE" = gateway ]; then
   # A host that HAD one from an earlier run keeps it unless it is removed,
   # which would be a surprise in the other direction. Say so plainly.
   if [ -f /etc/systemd/system/xxops-gateway-watchdog.timer ]; then
-    say ""
-    say "  NOTE: a watchdog from an earlier install is still present and"
-    say "  still running. To remove it:"
-    say "    sudo systemctl disable --now xxops-gateway-watchdog.timer"
-    say "    sudo rm -f /etc/systemd/system/xxops-gateway-watchdog.*"
+    if [ "$PASSIVE" = yes ]; then
+      systemctl disable --now xxops-gateway-watchdog.timer >/dev/null 2>&1 || true
+      systemctl disable --now xxops-gateway-watchdog.service >/dev/null 2>&1 || true
+      rm -f /etc/systemd/system/xxops-gateway-watchdog.*
+      systemctl daemon-reload
+      if [ -f /etc/systemd/system/xxops-gateway-watchdog.timer ]; then
+        say "  WARNING: could not remove the existing watchdog."
+      else
+        say "  removed the watchdog left by an earlier install"
+      fi
+    else
+      say ""
+      say "  NOTE: a watchdog from an earlier install is still present and"
+      say "  still running. --skip-agent does not remove it. To remove it,"
+      say "  re-run with --passive, or by hand:"
+      say "    sudo systemctl disable --now xxops-gateway-watchdog.timer"
+      say "    sudo rm -f /etc/systemd/system/xxops-gateway-watchdog.*"
+    fi
   fi
 fi
 
@@ -521,6 +541,35 @@ script once that is sorted, or use --skip-agent to leave the agent out."
 else
   step "Skipping the agent"
   say "as asked. Metrics and alerts work; actions from the app will not."
+  # --skip-agent has never removed an agent a previous run installed, so a
+  # re-run left the host exactly as privileged as it was. The sudoers file
+  # is the actual privilege, so it goes FIRST and is checked afterwards.
+  # Everything below it is cleanup; failing with the grant already gone is
+  # the safe way to fail.
+  if [ "$PASSIVE" = yes ]; then
+    if [ -f /etc/sudoers.d/xxops-agent ] \
+       || [ -f /etc/systemd/system/xxops-agent.service ]; then
+      rm -f /etc/sudoers.d/xxops-agent
+      systemctl disable --now xxops-agent.service >/dev/null 2>&1 || true
+      rm -f /etc/systemd/system/xxops-agent.service
+      rm -f /usr/local/bin/xxops-agent.py \
+            /usr/local/bin/xxops-update-node.sh \
+            /usr/local/bin/xxops-update-gateway.sh \
+            /etc/xxops/allowed_signers
+      systemctl daemon-reload
+      if [ -f /etc/sudoers.d/xxops-agent ]; then
+        say "  WARNING: /etc/sudoers.d/xxops-agent could NOT be removed."
+        say "  This host can still run privileged actions. Remove it by hand."
+      else
+        say "  removed the agent left by an earlier install: its sudoers"
+        say "  grant, its service, its scripts and its signing key list."
+        say "  The xxops-agent account remains and now has no privileges;"
+        say "  delete it with 'sudo userdel xxops-agent' if you want it gone."
+      fi
+    else
+      say "  no agent from an earlier install to remove."
+    fi
+  fi
 fi
 
 # --- did it actually work ----------------------------------------------------
