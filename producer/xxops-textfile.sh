@@ -511,6 +511,18 @@ LSPY
   [ -n "$ls_out" ] && printf '%s\n' "$ls_out" >> "$TMP"
 fi
 
+# --- which account is this actually running as? -----------------------------
+# The collector used to run as root, and two root code-execution bugs in this
+# file were critical because of it. It runs as alloy now - but that is a
+# property of the UNIT, and a unit can be edited, overridden by a drop-in, or
+# never reloaded. Reported from inside the process so it cannot be wrong.
+#
+# Same quote stripping as cpu_model below: one malformed line makes the
+# textfile collector reject the whole file, taking every other metric on this
+# host with it.
+xxu="$(id -un 2>/dev/null | tr -d '"\\')"
+[ -n "$xxu" ] && emit "xx_producer_user{user=\"$xxu\"} 1"
+
 emit "xx_textfile_producer_last_run $(date +%s)"
 mv "$TMP" "$OUT"
 chmod 644 "$OUT"
