@@ -556,7 +556,10 @@ if [ "$SKIP_AGENT" = no ]; then
   curl -fsS "$RAW/agent/install.sh" -o "$tmp" \
     || die "could not download the agent installer from $RAW"
   bash -n "$tmp" || die "the downloaded agent installer has a syntax error."
-  if bash "$tmp" "${MON}:8080/agent" "" "$TOKEN"; then
+    # --apply, because this line is only reached when we are already
+  # applying - the host installer's own dry run exits long before.
+  # Without it the agent would silently stop installing anywhere.
+  if bash "$tmp" "${MON}:8080/agent" "" "$TOKEN" --apply; then
     say "agent installed"
     # Tell the monitor where to reach this agent. Nothing else can: metrics
     # are PUSHED, so Prometheus only ever learns a label, never an address.

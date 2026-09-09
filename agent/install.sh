@@ -31,6 +31,24 @@
 # Safe to re-run: it upgrades an existing install in place.
 set -e
 
+# --apply is a FLAG, not a fourth positional. This script's three positional
+# arguments - monitor, bind address, token - are a contract the host
+# installer depends on, so the flag is pulled out of "$@" wherever it appears
+# and the positionals are re-set without it.
+#
+# DEFAULTING TO A DRY RUN IS THE POINT: this is the installer that creates an
+# account and writes a sudoers file, so it is the one worth reading before it
+# runs. A caller that passes no flag gets a plan and nothing else.
+APPLY=0
+XX_ARGS=()
+for xx_a in "$@"; do
+  case "$xx_a" in
+    --apply) APPLY=1 ;;
+    *)       XX_ARGS+=("$xx_a") ;;
+  esac
+done
+set -- ${XX_ARGS+"${XX_ARGS[@]}"}
+
 MON="${1:-${XXOPS_MONITOR:-}}"
 if [ -z "$MON" ]; then
   echo "xxOps agent installer" >&2
@@ -71,6 +89,41 @@ if [ -z "$TSIP" ]; then
   echo "pass it yourself, as the second argument:" >&2
   echo "  sudo bash install.sh <monitor>:8080/agent <this-host-address>" >&2
   exit 1
+fi
+
+# --- what this would do, and the line before it does any of it -------------
+#
+# Everything above is read-only: the root check, reading this host's label
+# out of the Alloy config, and working out which address to bind to. So a
+# dry run still catches the two things that actually go wrong here.
+#
+# Everything below changes the host, starting with useradd.
+echo ""
+echo "== What this will do"
+if id -u "$AGENT_USER" >/dev/null 2>&1; then
+  echo "   leave the $AGENT_USER account alone (it already exists)"
+else
+  echo "   create the $AGENT_USER system account, no shell, no home"
+fi
+echo "   grant it traverse on /opt/xxnetwork and read on cred/ and log/,"
+echo "     by ACL - no capabilities, and it can neither write nor execute"
+echo "     as anyone else"
+echo "   download the agent, its two update scripts and the signing key list"
+echo "     from ${MON}, verifying each against the manifest first"
+if [ -f /etc/sudoers.d/xxops-agent ]; then
+  echo "   REPLACE /etc/sudoers.d/xxops-agent - the privilege grant - after"
+  echo "     validating it with visudo"
+else
+  echo "   write /etc/sudoers.d/xxops-agent - the privilege grant - after"
+  echo "     validating it with visudo"
+fi
+echo "   install and start xxops-agent.service as ${LABEL}, listening on"
+echo "     ${TSIP}:8181"
+
+if [ "$APPLY" -ne 1 ]; then
+  echo ""
+  echo "Dry run - nothing was changed. Re-run with --apply to do it."
+  exit 0
 fi
 
 # --- the account it runs as -------------------------------------------------
