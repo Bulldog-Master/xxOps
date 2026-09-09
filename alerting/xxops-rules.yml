@@ -369,6 +369,33 @@ groups:
           detail: >-
             Same projection the capacity banner uses. Usually the TSDB growing,
             so check retention before the disk decides for you.
+  - name: xxops-privilege
+    rules:
+      - alert: CollectorRunningPrivileged
+        # The collector reports the account it is ACTUALLY running as, from
+        # inside the process. Two root code-execution bugs in that script
+        # were critical because of the account, not the parsing - so this is
+        # the property worth watching, not the bug that has been fixed.
+        expr: xx_producer_user{user!="alloy"} == 1
+        for: 10m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $labels.instance }} is running the collector as {{ $labels.user }}"
+          detail: "The metric producer should run as the unprivileged alloy account. Running it as anything else means a parsing mistake in that script costs the whole host. Re-run the host installer on this machine, or add User=alloy to /etc/systemd/system/xxops-textfile.service and reload."
+
+      - alert: CollectorPrivilegeUnknown
+        # A host rolled back to a producer from before this metric existed
+        # emits nothing for it - not user="root". The rule above would stay
+        # silent and the fleet would look clean. This catches the absence.
+        expr: |
+          (max by (instance) (up{pilot="xxops"}) == 1)
+          unless on(instance) xx_producer_user
+        for: 30m
+        labels: { severity: amber }
+        annotations:
+          summary: "{{ $labels.instance }} is not reporting which account its collector runs as"
+          detail: "Scrapes are succeeding but this host emits no xx_producer_user, so its collector privilege cannot be confirmed either way. Usually an older producer. Re-run the host installer with --apply on this host."
+
   - name: xxops-wrapper
     rules:
       - alert: WrapperCommandVerifyBroken
