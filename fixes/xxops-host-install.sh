@@ -29,6 +29,7 @@ MON=""
 ROLE=""
 TOKEN=""
 SKIP_AGENT=no
+APPLY=0
 
 usage() {
   cat >&2 <<'USAGE'
@@ -43,6 +44,10 @@ xxOps host install -- one node or gateway, one command.
   --token <TOKEN>      the enrolment token from the app, under Commands.
                        Without it this host still reports metrics and raises
                        alerts, but will not appear on the Commands tab.
+
+  --apply              actually do it. WITHOUT THIS IT IS A DRY RUN:
+                       it prints what it would do and changes
+                       nothing, the same as install-monitor.sh.
 
   --role node|gateway  only if the automatic guess is wrong.
   --skip-agent         install metrics only, no command agent.
@@ -63,6 +68,7 @@ while [ $# -gt 0 ]; do
     --role)       ROLE="${2:-}"; shift 2 ;;
     --token)      TOKEN="${2:-}"; shift 2 ;;
     --skip-agent) SKIP_AGENT=yes; shift ;;
+    --apply)      APPLY=1; shift ;;
     -h|--help)    usage ;;
     *) echo "unknown option: $1" >&2; echo "" >&2; usage ;;
   esac
@@ -145,6 +151,74 @@ else
 
 Nothing else will work until this does. Check the address, and that this
 host is on the same network as the monitor."
+fi
+
+# --- what this would do, and the line before it does any of it -------------
+#
+# Everything above here is read-only: argument checks, working out the role,
+# and a curl that proves the monitor answers. Everything below here changes
+# the host. install-monitor.sh draws the line the same way and uses the same
+# words, so the two installers behave alike.
+#
+# The plan is built from what is actually here rather than printed from a
+# fixed list. "install Alloy" on a host that already has it is the kind of
+# line that teaches you to stop reading the plan.
+CURRENT="describing the plan"
+step "What this will do"
+
+if command -v alloy >/dev/null 2>&1; then
+  say "leave Grafana Alloy alone (already installed)"
+else
+  say "install Grafana Alloy from Grafana's apt repository"
+fi
+
+if [ -f /etc/alloy/config.alloy ]; then
+  say "REPLACE /etc/alloy/config.alloy, labelling this host '${LABEL}'"
+  say "  and pointing it at ${MON}:9090 (the current one is backed up)"
+else
+  say "write /etc/alloy/config.alloy, labelling this host '${LABEL}'"
+  say "  and pointing it at ${MON}:9090"
+fi
+
+say "install the metric producer and its 60s timer, running as alloy"
+say "grant alloy read access to /opt/xxnetwork cred, log and config by ACL"
+
+if [ "$ROLE" = gateway ] && [ "$SKIP_AGENT" = no ]; then
+  say "install the gossip watchdog and its timer (gateway)"
+elif [ "$ROLE" = gateway ]; then
+  if [ -f /etc/systemd/system/xxops-gateway-watchdog.timer ]; then
+    say "NOT install the watchdog (--skip-agent), and LEAVE the existing"
+    say "  one running - this installer never removes it"
+  else
+    say "NOT install the watchdog (--skip-agent)"
+  fi
+fi
+
+say "write /etc/logrotate.d/xxnetwork and validate it"
+say "cap the systemd journal at 1G"
+
+if [ "$SKIP_AGENT" = no ]; then
+  say "install the xxOps agent, its account and its sudoers entry"
+  if [ -n "$TOKEN" ]; then
+    say "register this host with the monitor so it appears under Commands"
+  else
+    say "NOT register it (no --token), so it will not appear under Commands"
+  fi
+else
+  if [ -f /etc/sudoers.d/xxops-agent ]; then
+    say "NOT install the agent (--skip-agent), and LEAVE the existing one"
+    say "  and its sudoers grant in place - use agent/uninstall.sh to remove"
+  else
+    say "NOT install the agent (--skip-agent)"
+  fi
+fi
+
+say "check the monitor is receiving metrics labelled '${LABEL}'"
+
+if [ "$APPLY" -ne 1 ]; then
+  say ""
+  say "Dry run - nothing was changed. Re-run with --apply to do it."
+  exit 0
 fi
 
 # --- Alloy -------------------------------------------------------------------
