@@ -278,12 +278,80 @@ bash -n "$tmp" || die "the downloaded producer has a syntax error - truncated do
 install -m 755 "$tmp" /usr/local/bin/xxops-textfile.sh
 rm -f "$tmp"
 
+# --- what may read the validator's own directories --------------------------
+# Granted HERE, before the collector unit below, and regardless of
+# --skip-agent.
+#
+# These ACLs used to be set only by agent/install.sh, which runs later and
+# only when an agent is being installed. That was fine while the collector
+# ran as root, because root ignores ACLs. It stops being fine the moment the
+# collector runs as an unprivileged account: a --skip-agent host would never
+# get the grant, and the collector would quietly emit fewer metrics rather
+# than fail.
+#
+# Both accounts: alloy, which the collector runs as, and xxops-agent when it
+# exists. An account that is not present is skipped, not an error.
+if ! command -v setfacl >/dev/null 2>&1; then
+  step "install the acl package"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq acl >/dev/null 2>&1 || true
+fi
+
+if command -v setfacl >/dev/null 2>&1; then
+  xxops_grant() {
+    [ -e "$1" ] || return 0
+    for _u in alloy xxops-agent; do
+      id -u "$_u" >/dev/null 2>&1 || continue
+      setfacl -m "u:${_u}:$2" "$1" 2>/dev/null || true
+    done
+  }
+  xxops_grant /opt/xxnetwork        x
+  xxops_grant /opt/xxnetwork/cred   rx
+  xxops_grant /opt/xxnetwork/log    rx
+  xxops_grant /opt/xxnetwork/config rx
+
+  # Prove it, as the account the collector will actually run as. A
+  # filesystem mounted without acl support accepts setfacl and does nothing.
+  if [ -d /opt/xxnetwork/cred ] && id -u alloy >/dev/null 2>&1; then
+    if runuser -u alloy -- test -r /opt/xxnetwork/cred 2>/dev/null; then
+      say "  granted alloy read access to the validator's certs and logs"
+    else
+      say "  WARNING: alloy still cannot read /opt/xxnetwork/cred."
+      say "  The collector will run but will emit fewer metrics. Is this"
+      say "  filesystem mounted with acl support?"
+    fi
+  fi
+else
+  say "  WARNING: setfacl unavailable - the collector will not be able to"
+  say "  read the validator's certificates or logs."
+fi
+
+# RUNS AS alloy, NOT ROOT.
+#
+# Two root code-execution bugs were found in this collector in two days, and
+# both were critical only because of the account it ran under. Everything it
+# reads is world-readable or ACL-granted below; the one thing it must WRITE
+# is /var/lib/alloy/textfile, which alloy already owns.
+#
+# alloy rather than a new account: it exists on every host, it is already
+# unprivileged, and it is already the process that publishes these metrics.
+#
+# ProtectSystem=strict makes the whole filesystem read-only except the paths
+# named below, so even a future bug in this script cannot write anywhere
+# unexpected. NoNewPrivileges stops it gaining any through a setuid binary -
+# it needs none, unlike the agent.
 cat > /etc/systemd/system/xxops-textfile.service <<'EOF'
 [Unit]
 Description=xxOps textfile metric producer
 [Service]
 Type=oneshot
+User=alloy
+Group=alloy
 ExecStart=/usr/local/bin/xxops-textfile.sh
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ReadWritePaths=/var/lib/alloy/textfile
 EOF
 
 cat > /etc/systemd/system/xxops-textfile.timer <<'EOF'
