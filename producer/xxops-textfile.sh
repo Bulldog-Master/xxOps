@@ -82,6 +82,28 @@ else
   emit "xx_chain_rpc_up 0"
 fi
 
+# Open a TCP connection without building a command string. Used by the
+# gateway-to-node reachability probe, whose port comes from a config file the
+# validator account can write - see the port validation below. Runs in a
+# subshell so the redirect and the timeout cannot leak into this script.
+xxops_probe_tcp() {
+  local _ip="$1" _port="$2"
+  ( exec 3<>"/dev/tcp/${_ip}/${_port}" ) 2>/dev/null &
+  local _pid=$!
+  local _n=0
+  while [ "$_n" -lt 30 ]; do
+    kill -0 "$_pid" 2>/dev/null || break
+    sleep 0.1
+    _n=$((_n + 1))
+  done
+  if kill -0 "$_pid" 2>/dev/null; then
+    kill "$_pid" 2>/dev/null
+    wait "$_pid" 2>/dev/null
+    return 1
+  fi
+  wait "$_pid" 2>/dev/null
+}
+
 # --- can this gateway still find its node? ----------------------------------
 # the nodes sit on dynamic IPs behind dyndns while the gateways are static, so
 # a stale record is a real failure mode: the address moves and the gateway
@@ -90,12 +112,25 @@ GWCFG=/opt/xxnetwork/config/gateway.yaml
 if [ -f "$GWCFG" ]; then
   naddr="$(sed -n "s/^cmixAddress:[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*$/\1/p" "$GWCFG")"
   nhost="${naddr%%:*}"; nport="${naddr##*:}"; nname="${nhost%%.*}"
+  # A PORT IS A NUMBER. This value comes out of a config file the validator
+  # account can write, and it used to be interpolated into a string that
+  # `bash -c` evaluated - so a port of `1$(...)` ran as root every 60
+  # seconds. Reject anything that is not 1-65535 before going near it.
+  case "$nport" in
+    ""|*[!0-9]*) nport="" ;;
+    *) [ "$nport" -ge 1 ] 2>/dev/null && [ "$nport" -le 65535 ] 2>/dev/null || nport="" ;;
+  esac
   if [ -n "$nhost" ] && [ -n "$nport" ]; then
     nip="$(getent ahostsv4 "$nhost" 2>/dev/null | head -1 | cut -d" " -f1)"
     if printf "%s" "$nip" | grep -qE "^([0-9]{1,3}[.]){3}[0-9]{1,3}$"; then
       emit "xx_node_dns_resolves{node=\"$nname\"} 1"
       emit "xx_node_dns_ip{node=\"$nname\",host=\"$nhost\",ip=\"$nip\"} 1"
-      if timeout 3 bash -c "exec 3<>/dev/tcp/$nip/$nport" 2>/dev/null; then
+      # No `bash -c`, and nothing interpolated into a command string.
+      # This shell IS bash, so the /dev/tcp redirect works directly and the
+      # values are words rather than code. Belt and braces with the check
+      # above: if validation were ever loosened, there is no longer an
+      # evaluation for a crafted value to reach.
+      if xxops_probe_tcp "$nip" "$nport"; then
         emit "xx_node_reachable{node=\"$nname\"} 1"
       else
         emit "xx_node_reachable{node=\"$nname\"} 0"
