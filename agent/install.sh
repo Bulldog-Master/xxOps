@@ -98,6 +98,34 @@ fi
 # dry run still catches the two things that actually go wrong here.
 #
 # Everything below changes the host, starting with useradd.
+# --- does the monitor speak HTTPS? -----------------------------------------
+# Both installers used to build http:// unconditionally. A monitor serving
+# HTTPS only - what `tailscale cert` gives you - refused every fetch, and on a
+# plain-HTTP monitor the enrolment token crossed the network readable.
+MON_HOST="${MON%%/*}"
+XX_SCHEME=""
+if curl -sf -m 5 -o /dev/null "https://${MON_HOST}/api/health" 2>/dev/null; then
+  XX_SCHEME=https
+  XX_CURL_K=""
+elif curl -sfk -m 5 -o /dev/null "https://${MON_HOST}/api/health" 2>/dev/null; then
+  XX_SCHEME=https
+  XX_CURL_K="-k"
+  echo "  NOTE: the monitor's certificate could not be verified. The token"
+  echo "  and downloads are still encrypted in transit, but nothing proves"
+  echo "  which machine answered."
+elif curl -sf -m 5 -o /dev/null "http://${MON_HOST}/api/health" 2>/dev/null; then
+  XX_SCHEME=http
+  XX_CURL_K=""
+  echo "  WARNING: this monitor serves plain HTTP. Your enrolment token will"
+  echo "  cross the network readable, and it is reusable. Fine on a private"
+  echo "  network you trust; not fine on anything else."
+else
+  echo "REFUSING: ${MON_HOST} answered on neither HTTPS nor HTTP." >&2
+  echo "Check the address, and that this host can reach the monitor." >&2
+  exit 1
+fi
+XX_BASE="${XX_SCHEME}://${MON}"
+
 echo ""
 echo "== What this will do"
 if id -u "$AGENT_USER" >/dev/null 2>&1; then
@@ -109,7 +137,8 @@ echo "   grant it traverse on /opt/xxnetwork and read on cred/ and log/,"
 echo "     by ACL - no capabilities, and it can neither write nor execute"
 echo "     as anyone else"
 echo "   download the agent, its two update scripts and the signing key list"
-echo "     from ${MON}, verifying each against the manifest first"
+echo "     from ${XX_BASE}, over ${XX_SCHEME}, verifying each against the"
+echo "     monitor's MACed manifest before anything is installed"
 if [ -f /etc/sudoers.d/xxops-agent ]; then
   echo "   REPLACE /etc/sudoers.d/xxops-agent - the privilege grant - after"
   echo "     validating it with visudo"
@@ -228,7 +257,7 @@ fi
 
 mkdir -p /etc/xxops
 MAN="$(mktemp)"
-curl -sfS "http://${MON}/manifest" -o "$MAN" || {
+curl -sfS $XX_CURL_K "${XX_BASE}/manifest" -o "$MAN" || {
   echo "REFUSING: could not fetch the manifest from ${MON}." >&2
   echo "An older monitor does not serve one - update it first." >&2
   rm -f "$MAN"; exit 1; }
@@ -253,7 +282,7 @@ fi
 
 fetch_verified() {
   # $1 = name on the monitor, $2 = where to put it
-  curl -sfS "http://${MON}/$1" -o "$2" || {
+  curl -sfS $XX_CURL_K "${XX_BASE}/$1" -o "$2" || {
     echo "REFUSING: could not fetch $1 from ${MON}." >&2; return 1; }
   want="$(awk -v n="$1" '$2 == n {print $1}' "$MAN" | head -1)"
   got="$(sha256sum "$2" | cut -d' ' -f1)"

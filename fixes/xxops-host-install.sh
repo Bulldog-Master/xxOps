@@ -575,7 +575,16 @@ if [ "$SKIP_AGENT" = no ]; then
         say "could not work out this host's address - not registered."
         say "  the Commands tab will not list it. Everything else works."
       else
-        reg="$(curl -sS -m 20 -X POST "http://${MON}:8080/api/agent/register" \
+        # Same probe as the agent installer: this POST carries the
+        # enrolment token, and the token is reusable.
+        reg_scheme=http
+        reg_k=""
+        if curl -sf -m 5 -o /dev/null "https://${MON}:8080/api/health" 2>/dev/null; then
+          reg_scheme=https
+        elif curl -sfk -m 5 -o /dev/null "https://${MON}:8080/api/health" 2>/dev/null; then
+          reg_scheme=https; reg_k="-k"
+        fi
+        reg="$(curl -sS -m 20 $reg_k -X POST "${reg_scheme}://${MON}:8080/api/agent/register" \
                  -H "Content-Type: application/json" \
                  -d "{\"token\":\"${TOKEN}\",\"host\":\"${LABEL}\",\"ip\":\"${MYIP}\"}" \
                2>&1 || true)"
