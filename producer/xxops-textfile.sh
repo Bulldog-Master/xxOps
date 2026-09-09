@@ -166,7 +166,12 @@ if command -v nvidia-smi >/dev/null 2>&1; then
   nvidia-smi --query-gpu=name,temperature.gpu,utilization.gpu,memory.used,memory.total,power.draw,clocks.sm \
              --format=csv,noheader,nounits 2>/dev/null | while IFS="," read -r nm tp ut mu mt pw ck; do
     nm="$(echo "$nm" | sed "s/^ *//;s/ *$//")"
-    for v in tp ut mu mt pw ck; do eval "$v=\$(echo \$$v | tr -d \" \")"; done
+    # Strip spaces without eval. These six come from nvidia-smi, so nothing
+    # here is attacker-controlled - but an eval in a root script is the
+    # pattern that produced both of this week's actual root bugs, and this
+    # one only ever needed to delete spaces.
+    tp="${tp// /}"; ut="${ut// /}"; mu="${mu// /}"
+    mt="${mt// /}"; pw="${pw// /}"; ck="${ck// /}"
     L="{gpu=\"$idx\",model=\"$nm\"}"
     emit "xx_gpu_present$L 1"
     [ -n "$tp" ] && emit "xx_gpu_temp_celsius$L $tp"
