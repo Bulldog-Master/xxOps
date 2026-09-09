@@ -604,13 +604,51 @@ into the textfile directory Alloy scrapes.
 `bash -n` checks it parsed before you install it. A truncated download that
 still runs is worse than one that fails.
 
+**First, let the `alloy` account read what the producer reports on.** The
+producer runs unprivileged, and `/opt/xxnetwork` is `drwx------` owned by the
+validator account, so without this it would run safely and report nothing:
+
+    sudo apt-get install -y acl
+    sudo setfacl -m u:alloy:x  /opt/xxnetwork
+    sudo setfacl -m u:alloy:rx /opt/xxnetwork/cred
+    sudo setfacl -m u:alloy:rx /opt/xxnetwork/log
+    sudo setfacl -m u:alloy:rx /opt/xxnetwork/config
+
+Check it took. A filesystem mounted without ACL support accepts `setfacl` and
+silently does nothing:
+
+    sudo runuser -u alloy -- test -r /opt/xxnetwork/cred && echo "alloy can read the certs"
+
+The private key beside those certificates stays `-rw-------` and unreadable.
+The grant is traverse plus read on three directories, not a filesystem-wide
+capability.
+
     sudo tee /etc/systemd/system/xxops-textfile.service >/dev/null <<'EOF'
     [Unit]
     Description=xxOps textfile metric producer
     [Service]
     Type=oneshot
+    User=alloy
+    Group=alloy
     ExecStart=/usr/local/bin/xxops-textfile.sh
+    NoNewPrivileges=yes
+    ProtectHome=read-only
+    PrivateTmp=yes
     EOF
+
+**It runs as `alloy`, not root, and that matters more than it looks.** Two
+root code-execution bugs have been found in this script - a config value
+reaching `bash -c`, and a Python import from a writable path. Both are fixed,
+but the account is why they were critical. Running it unprivileged means the
+next parsing mistake costs an account that owns almost nothing.
+
+There is deliberately no filesystem sandbox directive here: it makes the
+filesystem read-only for the service, and the storage check then reports the
+HOST's disk as read-only on every machine.
+
+If you installed from an earlier version of this guide, your unit has no
+`User=` line and the producer is running as root. Re-run the host installer,
+or add the four lines above and `sudo systemctl daemon-reload`.
 
     sudo tee /etc/systemd/system/xxops-textfile.timer >/dev/null <<'EOF'
     [Unit]
