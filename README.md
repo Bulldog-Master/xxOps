@@ -67,8 +67,9 @@ Both installers print what they intend to do and change nothing until you pass
   with `visudo` before installation.
 - **Requests are signed.** The private key lives on the monitor alone, so a
   compromised host cannot forge instructions to the others.
-- **The agent is unprivileged**, with one capability that lets it read the
-  files it needs and nothing else.
+- **The agent is unprivileged.** It holds no Linux capabilities at all. The
+  handful of files it must read are granted by ACL on those exact paths, and
+  the installer verifies the read actually works rather than assuming it.
 - **Responses are filtered by who is asking.** A contact invited to the app
   sees their own validators and no trace of anyone else's, enforced on the
   server rather than by hiding tabs.
