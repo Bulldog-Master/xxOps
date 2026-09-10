@@ -212,6 +212,18 @@ if ! grep -q 'ls_state=/var/lib/xxops/linkspeed.json' /usr/local/bin/xxops-textf
 fi
 say "producer updated (previous kept as .bak)"
 
+# --- the account this runs as ----------------------------------------------
+# This service used to run as root while taking its executable paths from a
+# config file that --from-monitor fetches over plain HTTP. Two barriers now:
+# the paths are constants in the program, and this is not root.
+# Left by the version that ran as root. Nothing uses this path now.
+rm -f /run/xxops-linkspeed.lock
+id -u xxops-linkspeed >/dev/null 2>&1 || \
+  useradd --system --no-create-home --shell /usr/sbin/nologin xxops-linkspeed
+install -d -o xxops-linkspeed -g xxops-linkspeed -m 750 /var/lib/xxops
+chown root:xxops-linkspeed /etc/xxops/linkspeed.conf 2>/dev/null || true
+chmod 640 /etc/xxops/linkspeed.conf 2>/dev/null || true
+
 cat > /etc/systemd/system/xxops-linkspeed@.service <<'EOF'
 [Unit]
 Description=xxOps link-speed test (%i)
@@ -220,9 +232,16 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+User=xxops-linkspeed
+Group=xxops-linkspeed
+RuntimeDirectory=xxops-linkspeed
+RuntimeDirectoryPreserve=yes
 ExecStart=/usr/local/bin/xxops-linkspeed.py %i
 Nice=10
 IOSchedulingClass=idle
+NoNewPrivileges=yes
+ProtectHome=read-only
+PrivateTmp=yes
 EOF
 
 cat > /etc/systemd/system/xxops-linkspeed-health.timer <<'EOF'

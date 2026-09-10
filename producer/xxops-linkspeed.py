@@ -36,7 +36,10 @@ import time
 
 CONF = os.environ.get("XXOPS_LINKSPEED_CONF", "/etc/xxops/linkspeed.conf")
 STATE = os.environ.get("XXOPS_LINKSPEED_STATE", "/var/lib/xxops/linkspeed.json")
-LOCK = "/run/xxops-linkspeed.lock"
+# In a RuntimeDirectory systemd creates and owns for this service, so an
+# unprivileged unit can take it - and so it comes back after a reboot,
+# which a chowned file in /run would not.
+LOCK = "/run/xxops-linkspeed/lock"
 
 # Defaults; any of these can be overridden in the conf file.
 DEFAULTS = {
@@ -44,9 +47,14 @@ DEFAULTS = {
     "HEALTH_O": "3",
     "CAPACITY_T": "8",
     "CAPACITY_O": "3",
-    "IPERF3": "/usr/bin/iperf3",
-    "TAILSCALE": "/usr/bin/tailscale",
 }
+
+# NOT in DEFAULTS, and deliberately not readable from the conf file. These
+# are passed to subprocess as argv[0]; letting configuration choose them let
+# a conf file fetched over plain HTTP pick the program this runs. Constants
+# here means no conf file can name a program at all.
+IPERF3 = "/usr/bin/iperf3"
+TAILSCALE = "/usr/bin/tailscale"
 
 # A run must not outlive its own timer. -t plus -O plus handshake plus slack.
 TIMEOUT_SLACK = 25
@@ -62,7 +70,12 @@ def read_conf(path):
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 k, v = line.split("=", 1)
-                cfg[k.strip()] = v.strip().strip('"').strip("'")
+                k = k.strip()
+                # Refuse the two keys that choose a program, wherever this
+                # file came from.
+                if k in ("IPERF3", "TAILSCALE"):
+                    continue
+                cfg[k] = v.strip().strip('"').strip("'")
     except FileNotFoundError:
         return None
     return cfg
@@ -225,11 +238,11 @@ def main():
 
     # Warm first -- this call establishes the direct path. Its answer is
     # about the cold state and is deliberately discarded.
-    warm_path(cfg["TAILSCALE"], peer)
+    warm_path(TAILSCALE, peer)
 
     try:
-        up, up_retr = run_iperf(cfg["IPERF3"], peer, secs, omit, reverse=False)
-        down, down_retr = run_iperf(cfg["IPERF3"], peer, secs, omit, reverse=True)
+        up, up_retr = run_iperf(IPERF3, peer, secs, omit, reverse=False)
+        down, down_retr = run_iperf(IPERF3, peer, secs, omit, reverse=True)
     except RuntimeError as e:        # THE IMPORTANT BRANCH. Keep whatever was measured last, record why
         # this attempt failed, and let the age of the reading speak for
         # itself. Writing 0 here would page as a dead link.
@@ -246,7 +259,7 @@ def main():
 
     # Now that traffic has flowed, ask again. THIS is the answer that
     # describes the path the measurement actually used.
-    path = warm_path(cfg["TAILSCALE"], peer)
+    path = warm_path(TAILSCALE, peer)
 
     entry.update({
         "up_mbps": up,
