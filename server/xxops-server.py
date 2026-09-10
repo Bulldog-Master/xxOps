@@ -1232,10 +1232,26 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, pair_check(load_notify()))
         if p == "/api/version":
             try:
+                # EVERY front-end file, not just xxops.html. Hashing one file
+                # meant a deploy that changed only a .js left the hash alone,
+                # so the app was told nothing had changed and the update
+                # banner never fired - which is most deploys.
+                #
+                # Sorted, so the digest depends on content and not on the
+                # order the directory happens to list. The agent and the
+                # bundled fixes also live here and are excluded on purpose:
+                # they are not code the browser runs.
+                h = hashlib.md5()
+                for fn in sorted(os.listdir(APP_DIR)):
+                    if not fn.endswith((".html", ".css", ".js")):
+                        continue
+                    with open(os.path.join(APP_DIR, fn), "rb") as f:
+                        h.update(fn.encode())
+                        h.update(f.read())
                 with open(os.path.join(APP_DIR, "xxops.html"), "rb") as f:
                     b = f.read()
                 mv = re.search(rb"VERSION=\"(v[0-9.]+)\"", b)
-                return self._send(200, {"hash": hashlib.md5(b).hexdigest()[:12],
+                return self._send(200, {"hash": h.hexdigest()[:12],
                                         "version": mv.group(1).decode() if mv else "?"})
             except Exception:
                 return self._send(200, {"hash": "", "version": "?"})

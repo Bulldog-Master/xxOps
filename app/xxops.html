@@ -548,7 +548,14 @@ async function checkVersion(){
       appHash=d.hash;
       try{
         const seenHash=store.get("xxops.appHash", null);
-        if(seenHash && seenHash!==d.hash) showUpdated(d.version||"");
+        // A deploy that happened while the app was CLOSED used to show only a
+        // toast, which fades after six seconds. On a home-screen app with no
+        // address bar, a missed toast means running stale code with no way to
+        // notice. Turn the persistent button on as well - it waits.
+        if(seenHash && seenHash!==d.hash){
+          showUpdated(d.version||"");
+          const u=document.getElementById("upd"); if(u) u.classList.add("on");
+        }
         store.set("xxops.appHash", d.hash);
       }catch(e){}
       return;
