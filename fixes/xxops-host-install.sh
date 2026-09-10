@@ -516,6 +516,9 @@ if [ "$ROLE" = gateway ] && [ "$SKIP_AGENT" = no ]; then
   # A DEDICATED ACCOUNT, not alloy. alloy runs the producer, which has had
   # two root code-execution bugs this month - giving it a sudo rule would
   # mean the next one can restart gateways.
+  # Left by the version that ran as root. Nothing uses this path now,
+  # and while it existed the watchdog could not take its lock at all.
+  rm -f /var/lock/xxops-watchdog.lock
   id -u xxops-watchdog >/dev/null 2>&1 || \
     useradd --system --no-create-home --shell /usr/sbin/nologin xxops-watchdog
   install -d -o xxops-watchdog -g xxops-watchdog -m 750 /var/lib/xxops-watchdog
@@ -554,6 +557,8 @@ Description=xxOps gateway gossip watchdog
 Type=oneshot
 User=xxops-watchdog
 Group=xxops-watchdog
+RuntimeDirectory=xxops-watchdog
+RuntimeDirectoryPreserve=yes
 ExecStart=/usr/local/bin/xxops-gateway-watchdog.sh
 NoNewPrivileges=no
 ProtectHome=read-only

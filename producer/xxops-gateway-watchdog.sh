@@ -23,7 +23,11 @@ set -u
 
 # never let two copies run at once: an overlap corrupted the counters and made
 # the give-up metric flap between 1 and 0, resolving and refiring the alert.
-exec 9>/var/lock/xxops-watchdog.lock
+# In a RuntimeDirectory systemd creates and owns for this service. The
+# old /var/lock path was root-owned from when this ran as root, so after
+# the drop to xxops-watchdog every run died here for 17 hours - silently,
+# because the metrics kept their last values.
+exec 9>/run/xxops-watchdog/lock
 flock -n 9 || exit 0
 
 LOG=/opt/xxnetwork/log/gateway.log
@@ -96,6 +100,7 @@ write_metrics(){
   fails="$(cat "$FAIL_F")"
   { echo "xx_gateway_watchdog_restarts_total $(cat "$COUNT_F")"
     echo "xx_gateway_watchdog_last_restart $(cat "$LAST_F")"
+    echo "xx_gateway_watchdog_last_run $now"
     echo "xx_gateway_watchdog_gossip_age_seconds $age"
     echo "xx_gateway_watchdog_pipe_run $pipe_run"
     echo "xx_gateway_watchdog_pipe_storm $pipe_storm"

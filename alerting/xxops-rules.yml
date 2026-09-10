@@ -369,6 +369,20 @@ groups:
           detail: >-
             Same projection the capacity banner uses. Usually the TSDB growing,
             so check retention before the disk decides for you.
+  - name: xxops-watchdog-health
+    rules:
+      - alert: GatewayWatchdogNotRunning
+        # It publishes metrics from state files, so a dead watchdog keeps
+        # serving its last values and looks identical to a healthy one. That
+        # is how it went unnoticed for 17 hours after a permissions change.
+        # This is the only signal that separates the two.
+        expr: time() - xx_gateway_watchdog_last_run > 1800
+        for: 10m
+        labels: { severity: amber }
+        annotations:
+          summary: "{{ $labels.instance }} watchdog has not run for 30 minutes"
+          detail: "The gateway watchdog publishes its metrics from disk, so its other values stay put and look healthy when it is not running at all. Check journalctl -u xxops-gateway-watchdog on that host - a permissions problem on its lock or state directory will make every run exit silently."
+
   - name: xxops-privilege
     rules:
       - alert: CollectorRunningPrivileged
