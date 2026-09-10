@@ -112,7 +112,7 @@ function expandHTML(r){
           </select>
         </div>`;})()}
       ${(()=>{const key=r.node, out=checkOut[key];
-        const acts=[["gossip-status","Gossip","gw"],["cert-expiry","Certificate","gw"],
+        const acts=[["gossip-status","Gossip","gw"],["cert-expiry","Certificate","gw"],["config-drift","Drift","any"],
                     ["watchdog-state","Watchdog","gw"],["cmix-status","cMix","node"],
                     ["chain-health","Chain","node"],["producer-status","Producer","any"],
                     ["service-status","Services","any"],["disk","Disk","any"]];

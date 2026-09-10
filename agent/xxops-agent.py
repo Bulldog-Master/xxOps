@@ -257,6 +257,74 @@ def a_wrapper_log():
     return "\n".join(lines[-40:]) or "nothing in the log"
 
 
+def a_config_drift():
+    """The configuration traps that have actually taken hosts down here.
+
+    Each of these was found the hard way, on one host, by hand. None needs
+    privilege to check, so there is no reason for finding the next one to
+    cost a fleet-wide paste.
+    """
+    out = []
+
+    # The trap that took a node out for most of a day: tmpfs on the textfile
+    # directory mounts root-owned unless fstab says otherwise, so the producer
+    # cannot write after the next reboot. Healthy today, broken at boot.
+    fstab_line = None
+    try:
+        with open("/etc/fstab", encoding="utf-8") as fh:
+            for line in fh:
+                if "alloy/textfile" in line and not line.strip().startswith("#"):
+                    fstab_line = line.strip()
+                    break
+    except OSError:
+        pass
+    if fstab_line is None:
+        out.append("tmpfs:     no textfile tmpfs in fstab (not affected)")
+    elif "uid=0" in fstab_line or "gid=0" in fstab_line:
+        out.append("tmpfs:     AT RISK - fstab mounts it root-owned, so the "
+                   "producer stops at the next reboot")
+    else:
+        out.append("tmpfs:     fstab sets a non-root owner (good)")
+
+    # Who owns it right now, which is a different question from what fstab
+    # says: a chown fixes today and fstab decides tomorrow.
+    try:
+        st = os.stat("/var/lib/alloy/textfile")
+        import pwd
+        try:
+            owner = pwd.getpwuid(st.st_uid).pw_name
+        except KeyError:
+            owner = str(st.st_uid)
+        ok = owner == "alloy"
+        out.append("textfile:  owned by %s%s"
+                   % (owner, "" if ok else "  <- should be alloy"))
+    except OSError as e:
+        out.append("textfile:  cannot stat the directory: %s" % e)
+
+    # A dead producer keeps its last metrics published, so it looks healthy
+    # from the monitor. The file's age is the only honest signal.
+    try:
+        age = int(time.time() - os.stat(XXPROM).st_mtime)
+        out.append("producer:  xx.prom %ds old%s"
+                   % (age, "" if age < 180 else "  <- STALE, metrics frozen"))
+    except FileNotFoundError:
+        out.append("producer:  xx.prom missing - it is not running")
+    except OSError as e:
+        out.append("producer:  cannot stat xx.prom: %s" % e)
+
+    # Gateways only. The watchdog took its lock in /var/lock, which stayed
+    # root-owned after it dropped privilege, so every run exited silently for
+    # 17 hours while its metrics kept their last values.
+    if os.path.exists(GW_CONF):
+        if os.path.isdir("/run/xxops-watchdog"):
+            out.append("watchdog:  runtime directory present (good)")
+        else:
+            out.append("watchdog:  NO runtime directory - it cannot take its "
+                       "lock, so every run exits doing nothing")
+
+    return "\n".join(out)
+
+
 CATALOGUE = {
     # name: (needs, how, description)
     "disk":            (None,     ["df", "-h", "/"],            "disk usage"),
@@ -275,6 +343,8 @@ CATALOGUE = {
     "gossip-status":   (GW_LOG,   a_gossip_status,              "peering and liveness in one answer"),
     "watchdog-state":  (GW_CONF,  a_watchdog_state,             "has automated recovery given up"),
     "cmix-status":     (CMIX_LOG, a_cmix_status,                "last cMix round and the err file"),
+    "config-drift":    (None,     a_config_drift,
+                                  "configuration traps that take a host down later"),
     "gpu":             (None,     ["nvidia-smi", "--query-gpu=name,temperature.gpu,power.draw,memory.used",
                                    "--format=csv,noheader"], "GPU state, nodes only"),
 }
