@@ -24,6 +24,45 @@ set -eu
 
 RAW="${XXOPS_RAW:-https://raw.githubusercontent.com/Bulldog-Master/xxOps/main}"
 
+# --- where do the components come from? ------------------------------------
+# An audited SHA has to determine what actually gets installed, or the audit
+# anchor means nothing. If this script is running out of a checkout, take the
+# producer, watchdog and agent installer from THAT TREE rather than fetching
+# whatever main happens to be right now.
+#
+# Piped from curl there is no path to resolve, so this stays empty and the
+# download path runs exactly as it always has.
+#
+# An explicit XXOPS_RAW always wins: naming a source means you meant it.
+XX_SRC=""
+if [ -z "${XXOPS_RAW:-}" ]; then
+  _self="${BASH_SOURCE[0]:-$0}"
+  case "$_self" in
+    */*)
+      _root="$(cd "$(dirname "$_self")/.." 2>/dev/null && pwd || true)"
+      if [ -n "$_root" ] && [ -f "$_root/producer/xxops-textfile.sh" ] \
+         && [ -f "$_root/agent/install.sh" ]; then
+        XX_SRC="$_root"
+      fi
+      ;;
+  esac
+fi
+
+if [ -n "$XX_SRC" ]; then
+  XX_ORIGIN="$XX_SRC (this checkout)"
+else
+  XX_ORIGIN="$RAW"
+fi
+
+# $1 = path inside the repo, $2 = where to put it
+xx_fetch() {
+  if [ -n "$XX_SRC" ] && [ -f "$XX_SRC/$1" ]; then
+    cp "$XX_SRC/$1" "$2"
+  else
+    curl -fsS "$RAW/$1" -o "$2"
+  fi
+}
+
 LABEL=""
 MON=""
 ROLE=""
@@ -165,6 +204,8 @@ fi
 # line that teaches you to stop reading the plan.
 CURRENT="describing the plan"
 step "What this will do"
+say "take the producer, watchdog and agent installer from:"
+say "  ${XX_ORIGIN}"
 
 if command -v alloy >/dev/null 2>&1; then
   say "leave Grafana Alloy alone (already installed)"
@@ -349,8 +390,8 @@ say "alloy running"
 CURRENT="installing the metric producer"
 step "Installing the producer"
 tmp="$(mktemp)"
-curl -fsS "$RAW/producer/xxops-textfile.sh" -o "$tmp" \
-  || die "could not download the producer from $RAW"
+xx_fetch producer/xxops-textfile.sh "$tmp" \
+  || die "could not obtain the producer from $XX_ORIGIN"
 bash -n "$tmp" || die "the downloaded producer has a syntax error - truncated download?"
 install -m 755 "$tmp" /usr/local/bin/xxops-textfile.sh
 rm -f "$tmp"
@@ -466,8 +507,8 @@ if [ "$ROLE" = gateway ] && [ "$SKIP_AGENT" = no ]; then
   CURRENT="installing the gateway watchdog"
   step "Installing the gateway watchdog"
   tmp="$(mktemp)"
-  curl -fsS "$RAW/producer/xxops-gateway-watchdog.sh" -o "$tmp" \
-    || die "could not download the watchdog from $RAW"
+  xx_fetch producer/xxops-gateway-watchdog.sh "$tmp" \
+    || die "could not obtain the watchdog from $XX_ORIGIN"
   bash -n "$tmp" || die "the downloaded watchdog has a syntax error."
   install -m 755 "$tmp" /usr/local/bin/xxops-gateway-watchdog.sh
   rm -f "$tmp"
@@ -553,8 +594,8 @@ if [ "$SKIP_AGENT" = no ]; then
   CURRENT="installing the xxOps agent"
   step "Installing the agent"
   tmp="$(mktemp)"
-  curl -fsS "$RAW/agent/install.sh" -o "$tmp" \
-    || die "could not download the agent installer from $RAW"
+  xx_fetch agent/install.sh "$tmp" \
+    || die "could not obtain the agent installer from $XX_ORIGIN"
   bash -n "$tmp" || die "the downloaded agent installer has a syntax error."
     # --apply, because this line is only reached when we are already
   # applying - the host installer's own dry run exits long before.
