@@ -35,6 +35,39 @@ jobs:
         # do not need them.
         run: python3 tests/run.py
 
+      - name: Python files parse
+        # tests/run.py only imports the test modules, so a .py that no test
+        # imports is never compiled. monitor/xxops-linkspeed-peers.py shipped
+        # with a syntax error and a green badge because of that gap - the
+        # export had corrupted it and nothing read it as code.
+        #
+        # Discovered, not listed, for the same reason the shell check is.
+        run: |
+          python3 - <<'PYCHECK'
+          import ast, os, sys
+          bad = []
+          for root, dirs, files in os.walk("."):
+              dirs[:] = [d for d in dirs if d not in (".git", "__pycache__")]
+              for f in files:
+                  if not f.endswith(".py"):
+                      continue
+                  p = os.path.join(root, f)
+                  try:
+                      with open(p, encoding="utf-8") as fh:
+                          ast.parse(fh.read())
+                  except SyntaxError as e:
+                      bad.append("%s:%s %s" % (p, e.lineno, e.msg))
+                  except (OSError, UnicodeDecodeError) as e:
+                      bad.append("%s unreadable: %s" % (p, e))
+                  else:
+                      print("ok  %s" % p)
+          if bad:
+              print("")
+              print("these do not parse:")
+              print("\n".join(bad))
+              sys.exit(1)
+          PYCHECK
+
       - name: Shell scripts parse
         # bash -n alone would NOT have caught the real bug here: a block of
         # shell landed inside die()'s printf string, which is malformed but
