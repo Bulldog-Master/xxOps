@@ -337,7 +337,7 @@ if [ -n "$mtu_iface" ]; then
     # config change - so it has to survive three attempts, and then a small
     # ping has to succeed to separate a real MTU limit from blocked ICMP.
     #
-    # The single-ping version reported 14 of every nodes faulty; twelve of them
+    # The single-ping version reported most nodes faulty; twelve of them
     # flipped value within two hours.
     mtu_big=0
     for _ in 1 2 3; do

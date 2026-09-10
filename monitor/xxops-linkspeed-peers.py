@@ -58,7 +58,9 @@ def main():
             agents = json.load(fh)
     except Exception as e:
         print("cannot read %s: %s" % (AGENTS, e))
-        return every nodes, gateways = {}, {}
+        return 1
+
+    nodes, gateways = {}, {}
     for name, info in sorted(agents.items()):
         if not isinstance(info, dict):
             continue
