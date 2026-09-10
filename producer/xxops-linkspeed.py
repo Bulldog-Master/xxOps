@@ -29,6 +29,7 @@ Usage:  xxops-linkspeed.py health
 import fcntl
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -60,12 +61,40 @@ TAILSCALE = "/usr/bin/tailscale"
 TIMEOUT_SLACK = 25
 
 
+# Exactly what a conf file may set. Anything else is ignored and reported.
+# An allowlist rather than a blocklist: the blocklist version had to be
+# extended every time a new key turned out to matter, and IPERF3 got there
+# first.
+ALLOWED = {"LISTEN_IP", "GATEWAY_PEER", "NODE_PEER",
+           "HEALTH_T", "HEALTH_O", "CAPACITY_T", "CAPACITY_O"}
+
+# Seconds. A run must fit inside its own timer, so these are bounded rather
+# than trusted - the --from-monitor path fetches this file over HTTP.
+BOUNDS = {"HEALTH_T": (1, 60), "HEALTH_O": (0, 30),
+          "CAPACITY_T": (1, 60), "CAPACITY_O": (0, 30)}
+
+# iperf3 -c and tailscale ping take this as an argument. A value starting
+# with "-" would be read as a flag by those tools. Not a shell, and this file
+# is local, but there is no reason to pass something that is not a host.
+PEERISH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
+
+
+def sane_peer(v):
+    return all(PEERISH.match(p.strip()) for p in v.split(",") if p.strip())
+
+
 def read_conf(path):
-    """KEY=VALUE lines. Blank lines and # comments ignored."""
+    """KEY=VALUE lines. Blank lines and # comments ignored.
+
+    Unknown keys are ignored, timings are bounded, and peers must look like
+    hosts. A bad value falls back to the default rather than stopping the
+    run: a host that quietly stops measuring is worse than one that measures
+    with sane numbers.
+    """
     cfg = dict(DEFAULTS)
     try:
         with open(path, encoding="utf-8") as fh:
-            for line in fh:
+            for ln, line in enumerate(fh, 1):
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:
                     continue
@@ -75,7 +104,26 @@ def read_conf(path):
                 # file came from.
                 if k in ("IPERF3", "TAILSCALE"):
                     continue
-                cfg[k] = v.strip().strip('"').strip("'")
+                if k not in ALLOWED:
+                    print("ignoring unknown key %s at %s:%d" % (k, path, ln))
+                    continue
+                v = v.strip().strip('"').strip("'")
+                if k in BOUNDS:
+                    lo, hi = BOUNDS[k]
+                    try:
+                        n = int(v)
+                    except ValueError:
+                        print("%s is not a number, using %s" % (k, DEFAULTS[k]))
+                        continue
+                    if not lo <= n <= hi:
+                        print("%s=%d out of range %d-%d, using %s"
+                              % (k, n, lo, hi, DEFAULTS[k]))
+                        continue
+                    v = str(n)
+                elif k in ("GATEWAY_PEER", "NODE_PEER") and not sane_peer(v):
+                    print("%s does not look like a host, ignoring" % k)
+                    continue
+                cfg[k] = v
     except FileNotFoundError:
         return None
     return cfg
