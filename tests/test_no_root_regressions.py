@@ -52,5 +52,38 @@ class NoRootRegressions(unittest.TestCase):
         self.assertEqual(bad, [], "PYTHONPATH set without runuser: %r" % bad)
 
 
+class WatchdogStaysUnprivileged(unittest.TestCase):
+    """The watchdog went from root to its own account with one sudo rule.
+
+    Both live in an installer heredoc, which is where a later edit reverts
+    something without anyone noticing. The collector has these tripwires;
+    the watchdog did not.
+    """
+
+    def installer(self):
+        with open(INSTALLER, encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_the_watchdog_unit_is_not_root(self):
+        text = self.installer()
+        i = text.index("xxops-gateway-watchdog.service")
+        self.assertIn("User=xxops-watchdog", text[i:i + 800],
+                      "the watchdog unit no longer sets User=xxops-watchdog")
+
+    def test_the_sudo_rule_is_one_exact_command(self):
+        """Its whole privilege. A wildcard here is a root shell."""
+        self.assertIn(
+            "xxops-watchdog ALL=(root) NOPASSWD: "
+            "/usr/bin/systemctl restart xxnetwork-gateway",
+            self.installer(),
+            "the watchdog sudoers line is not the exact expected command")
+
+    def test_no_broad_sudo_rule_crept_in(self):
+        text = self.installer()
+        for bad in ("NOPASSWD: ALL", "ALL=(ALL)", "systemctl *",
+                    "NOPASSWD: /usr/bin/systemctl restart *"):
+            self.assertNotIn(bad, text, "broad sudo rule present: %s" % bad)
+
+
 if __name__ == "__main__":
     unittest.main()

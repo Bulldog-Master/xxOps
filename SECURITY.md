@@ -80,6 +80,16 @@ discover it:
 - **A host running the agent trusts whichever monitor's public key is in
   `/etc/xxops/allowed_signers`.** Re-running an installer against a different
   monitor replaces it.
+- **Enrolment prefers HTTPS, and will accept a certificate it cannot
+  verify.** The installers try strict HTTPS first, fall back to HTTPS with
+  the certificate unverified, and only then to plain HTTP — saying which at
+  each step. The middle case is the common one: a `tailscale cert` is issued
+  for the machine's `.ts.net` name while installers connect by address, so
+  verification fails even though the certificate is genuine. In that state
+  the enrolment token cannot be read by someone watching the traffic, but
+  could be collected by someone who successfully impersonates the monitor.
+  On a private network that is a reasonable trade. On anything else, reach
+  the monitor by its certificate's name so verification succeeds.
 
 ## Scope
 
