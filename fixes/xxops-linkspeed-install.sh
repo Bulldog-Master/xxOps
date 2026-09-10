@@ -220,7 +220,14 @@ say "producer updated (previous kept as .bak)"
 rm -f /run/xxops-linkspeed.lock
 id -u xxops-linkspeed >/dev/null 2>&1 || \
   useradd --system --no-create-home --shell /usr/sbin/nologin xxops-linkspeed
-install -d -o xxops-linkspeed -g xxops-linkspeed -m 750 /var/lib/xxops
+# GROUP alloy, not xxops-linkspeed. The PRODUCER runs as alloy and reads
+# linkspeed.json from here to emit xx_linkspeed_*. Owning this
+# directory outright locked it out and the metric disappeared from
+# every node at once. xxops-linkspeed writes, alloy reads.
+install -d -o xxops-linkspeed -g alloy -m 750 /var/lib/xxops
+chgrp alloy /var/lib/xxops 2>/dev/null || true
+chmod 640 /var/lib/xxops/linkspeed.json 2>/dev/null || true
+chgrp alloy /var/lib/xxops/linkspeed.json 2>/dev/null || true
 chown root:xxops-linkspeed /etc/xxops/linkspeed.conf 2>/dev/null || true
 chmod 640 /etc/xxops/linkspeed.conf 2>/dev/null || true
 
