@@ -677,13 +677,56 @@ gone deaf to its peers while still looking alive:
     curl -sL https://raw.githubusercontent.com/Bulldog-Master/xxOps/main/producer/xxops-gateway-watchdog.sh -o /tmp/xxops-gateway-watchdog.sh
     bash -n /tmp/xxops-gateway-watchdog.sh && sudo install -m 755 /tmp/xxops-gateway-watchdog.sh /usr/local/bin/
 
+**Give it its own account.** The watchdog restarts a service based on a log
+the validator account writes, so it should not be root - and it should not be
+`alloy` either, because `alloy` runs the producer:
+
+    sudo useradd --system --no-create-home --shell /usr/sbin/nologin xxops-watchdog
+    sudo install -d -o xxops-watchdog -g xxops-watchdog -m 750 /var/lib/xxops-watchdog
+    sudo setfacl -m u:xxops-watchdog:x   /opt/xxnetwork
+    sudo setfacl -m u:xxops-watchdog:rx  /opt/xxnetwork/log
+    sudo setfacl -m u:xxops-watchdog:x   /var/lib/alloy
+    sudo setfacl -m u:xxops-watchdog:rwx /var/lib/alloy/textfile
+
+The traverse grant on `/var/lib/alloy` is not optional. It is `drwxr-x---`,
+so without it the account cannot reach the textfile directory it has rights
+on, and the watchdog silently publishes no counters at all.
+
+Check both:
+
+    sudo -u xxops-watchdog test -r /opt/xxnetwork/log/gateway.log && echo "can read the log"
+    sudo -u xxops-watchdog test -w /var/lib/alloy/textfile && echo "can write metrics"
+
+**Then one sudo rule, and only one.** Write it to a temp file and validate it
+before installing - a malformed sudoers file can lock you out of sudo
+entirely:
+
+    printf '%s\n' "xxops-watchdog ALL=(root) NOPASSWD: /usr/bin/systemctl restart xxnetwork-gateway" | sudo tee /tmp/wd-sudo >/dev/null
+    sudo visudo -cf /tmp/wd-sudo && sudo install -m 440 -o root -g root /tmp/wd-sudo /etc/sudoers.d/xxops-watchdog
+    rm -f /tmp/wd-sudo
+
+That is the whole of its privilege: restart one named service. It cannot stop
+anything, edit anything, or restart anything else.
+
     sudo tee /etc/systemd/system/xxops-gateway-watchdog.service >/dev/null <<'EOF'
     [Unit]
     Description=xxOps gateway gossip watchdog
     [Service]
     Type=oneshot
+    User=xxops-watchdog
+    Group=xxops-watchdog
     ExecStart=/usr/local/bin/xxops-gateway-watchdog.sh
+    NoNewPrivileges=no
+    ProtectHome=read-only
+    PrivateTmp=yes
     EOF
+
+`NoNewPrivileges=no` is deliberate and is the one exception: sudo needs the
+setuid transition, so turning it on would stop the restart working.
+
+If you installed from an earlier version of this guide, your watchdog is
+running as root. Re-run the host installer, or follow the steps above and
+`sudo systemctl daemon-reload`.
 
     sudo tee /etc/systemd/system/xxops-gateway-watchdog.timer >/dev/null <<'EOF'
     [Unit]
