@@ -868,6 +868,14 @@ leave `--peers` off. You still get the gateway measurement.
 
 #### Notes
 
+The measurement runs as its own unprivileged account, `xxops-linkspeed`, and
+the listener runs as `nobody`. Neither has sudo. The paths to `iperf3` and
+`tailscale` are fixed in the program rather than read from
+`/etc/xxops/linkspeed.conf`, and that file may only set the listen address,
+the peers, and four bounded timing values — anything else in it is ignored
+with a warning. It used to run as root and take its executable path from that
+file, which is a combination worth not having.
+
 `iperf3` is installed if it is missing. The listener binds to **one** address,
 not all of them — these machines have a public address too, and an
 unauthenticated bandwidth test should not be reachable from the internet. The

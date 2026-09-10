@@ -123,12 +123,6 @@ class RouteAuth(unittest.TestCase):
         self.assertEqual(ungated, [], "these answered without a session:\n  "
                          + "\n  ".join(ungated))
 
-    def test_no_route_is_accidentally_public(self):
-        """A route in neither category is an undecided route."""
-        undecided = [p for p in sorted(self.routes)
-                     if not is_exempt(p) and p not in self.routes]
-        self.assertEqual(undecided, [])
-
     def test_exempt_list_is_not_stale(self):
         """An exemption for a route that no longer exists hides intent."""
         gone = [p for p in EXEMPT if p not in self.routes]
