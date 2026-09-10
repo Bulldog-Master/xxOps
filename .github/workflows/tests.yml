@@ -28,6 +28,44 @@ jobs:
       - name: Python version
         run: python3 --version
 
+      - name: Install promtool and amtool
+        # Alert rules and Alertmanager routing are their own languages; the
+        # tests that validate them skip without these, so CI has never run
+        # them. A green badge over unrun checks is the same failure as the
+        # Python file that shipped unparsed.
+        #
+        # Pinned and checksummed. "latest" would mean the audited SHA no
+        # longer determines what the build used.
+        run: |
+          set -euo pipefail
+          PROM_VER=3.5.0
+          PROM_SHA=e811827af26d822afb09a4f28314f61b618b12cff5369835a67f674d8b46f39a
+          AM_VER=0.28.1
+          AM_SHA=5ac7ab5e4b8ee5ce4d8fb0988f9cb275efcc3f181b4b408179fafee121693311
+
+          cd "$(mktemp -d)"
+          curl -sSfLO "https://github.com/prometheus/prometheus/releases/download/v${PROM_VER}/prometheus-${PROM_VER}.linux-amd64.tar.gz"
+          echo "${PROM_SHA}  prometheus-${PROM_VER}.linux-amd64.tar.gz" | sha256sum -c -
+          tar xzf "prometheus-${PROM_VER}.linux-amd64.tar.gz"
+          sudo install -m 755 "prometheus-${PROM_VER}.linux-amd64/promtool" /usr/local/bin/promtool
+
+          curl -sSfLO "https://github.com/prometheus/alertmanager/releases/download/v${AM_VER}/alertmanager-${AM_VER}.linux-amd64.tar.gz"
+          echo "${AM_SHA}  alertmanager-${AM_VER}.linux-amd64.tar.gz" | sha256sum -c -
+          tar xzf "alertmanager-${AM_VER}.linux-amd64.tar.gz"
+          sudo install -m 755 "alertmanager-${AM_VER}.linux-amd64/amtool" /usr/local/bin/amtool
+
+          promtool --version
+          amtool --version
+
+      - name: No test may skip for a missing tool
+        # The suite skips cleanly without these binaries, which is right on a
+        # laptop and wrong here. If the install step above ever silently stops
+        # working, this catches it rather than letting the badge go green over
+        # checks nobody ran.
+        run: |
+          command -v promtool >/dev/null || { echo "promtool missing"; exit 1; }
+          command -v amtool   >/dev/null || { echo "amtool missing";   exit 1; }
+
       - name: Server and agent tests
         # run.py already exits non-zero on failure, so no extra plumbing.
         # Some tests skip without promtool/amtool; that is expected here and
