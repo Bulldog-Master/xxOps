@@ -41,9 +41,10 @@ jobs:
         # still valid shell. So also check that every function definition is
         # a single line that ends where it should.
         run: |
-          for f in install-monitor.sh agent/install.sh agent/uninstall.sh \
-                   fixes/xxops-host-install.sh backup/xxops-backup.sh; do
-            [ -f "$f" ] || continue
+          # Discovered, not listed. The hand-written list covered five of
+          # ten scripts and silently omitted the producer - the largest
+          # shell file here, and where both root bugs lived.
+          for f in $(find . -name '*.sh' -not -path './.git/*' | sort); do
             bash -n "$f" && echo "ok  $f"
           done
           python3 - <<'CHECK'
