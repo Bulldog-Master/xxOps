@@ -369,6 +369,30 @@ groups:
           detail: >-
             Same projection the capacity banner uses. Usually the TSDB growing,
             so check retention before the disk decides for you.
+  - name: xxops-node-reporting
+    rules:
+      - alert: NodeRoundNumberAbsent
+        # The app calls this offline / no-rounds-reported, and this is the
+        # same test: reachable, but publishing no round number at all.
+        #
+        # Every other node rule compares a value INSIDE a producer metric, so
+        # when the producer itself dies the series vanish and those rules go
+        # quiet rather than firing. A node was dark for most of a day that
+        # way, visible in the app and silent everywhere else.
+        #
+        # Anchored on substrate_node_roles, not up: it selects NODES only -
+        # gateways publish no round number and `up` would page for all of
+        # them - and it comes from the chain scrape rather than the producer,
+        # so it survives exactly the failure this rule is for.
+        expr: |
+          (max by (instance) (substrate_node_roles) == 4)
+          unless on(instance) xx_cmix_last_round
+        for: 15m
+        labels: { severity: red }
+        annotations:
+          summary: "{{ $labels.instance }} is reporting no round number at all"
+          detail: "The host is reachable but publishes no xx_cmix_last_round, which is what the app shows as offline and not earning. Usually the metric producer has stopped rather than cMix - check systemctl status xxops-textfile on that host, and that alloy can write to /var/lib/alloy/textfile. A tmpfs there mounts root-owned unless fstab sets uid and gid, which takes the producer out at the next reboot."
+
   - name: xxops-watchdog-health
     rules:
       - alert: GatewayWatchdogNeverRan
