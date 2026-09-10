@@ -37,6 +37,17 @@ GRACE_MIN=${XXOPS_GRACE_MIN:-10}     # ignore a service that only just started
 MAX_TRIES=${XXOPS_MAX_TRIES:-3}      # stop after this many restarts that did not help
 MIN_LOG_BYTES=${XXOPS_MIN_LOG:-50000}
 
+# The wrapper's own log, which is NOT the gossip log above. A gateway can
+# gossip normally while its wrapper is wedged unable to query sync state -
+# that is exactly what went unseen for four and a half hours on 10 Sep.
+WLOG=/opt/xxnetwork/log/gateway-wrapper.log
+# The exact line, matched literally. [Errno 111] Connection refused looks
+# similar and RECOVERS ON ITS OWN - observed on this fleet with no
+# intervention needed. Only the
+# broken pipe wedges.
+PIPE_NEEDLE="Failed to query sync state: [Errno 32] Broken pipe"
+PIPE_MIN=${XXOPS_PIPE_MIN:-30}       # consecutive lines = storm (~5 min at 10s)
+
 [ -f "$LOG" ] || exit 0              # not a gateway
 
 mkdir -p "$STATE" "$(dirname "$OUT")"
@@ -56,11 +67,38 @@ else
 fi
 if [ "$last" -gt 0 ]; then age=$(( now - last )); else age=-1; fi
 
+# --- broken-pipe storm ------------------------------------------------------
+# Consecutive matches counting BACKWARDS from the end. Not a proportion of the
+# last N lines: the wrapper log is not truncated on restart, so it still ends
+# with the old storm afterwards and a proportion test would restart forever.
+#
+# Only counted if the file GREW since the last pass. mtime is bumped by
+# logrotate and backups; growth is not. A file that shrank was rotated, so
+# that pass is skipped rather than guessed at.
+WSIZE_F="$STATE/wrapper_size"
+[ -f "$WSIZE_F" ] || echo 0 > "$WSIZE_F"
+pipe_run=0
+if [ -f "$WLOG" ]; then
+  wsize=$(stat -c %s "$WLOG" 2>/dev/null || echo 0)
+  wprev=$(cat "$WSIZE_F" 2>/dev/null || echo 0)
+  echo "$wsize" > "$WSIZE_F"
+  if [ "$wsize" -gt "$wprev" ]; then
+    # index() is a literal substring test - no regex, and nothing from the
+    # log is ever interpolated into a command.
+    pipe_run="$(tail -c 200000 "$WLOG" 2>/dev/null | tac \
+      | awk -v n="$PIPE_NEEDLE" 'index($0,n){c++; next} {exit} END{print c+0}')"
+  fi
+fi
+[ -n "$pipe_run" ] || pipe_run=0
+if [ "$pipe_run" -ge "$PIPE_MIN" ]; then pipe_storm=1; else pipe_storm=0; fi
+
 write_metrics(){
   fails="$(cat "$FAIL_F")"
   { echo "xx_gateway_watchdog_restarts_total $(cat "$COUNT_F")"
     echo "xx_gateway_watchdog_last_restart $(cat "$LAST_F")"
     echo "xx_gateway_watchdog_gossip_age_seconds $age"
+    echo "xx_gateway_watchdog_pipe_run $pipe_run"
+    echo "xx_gateway_watchdog_pipe_storm $pipe_storm"
     echo "xx_gateway_watchdog_consecutive_failures $fails"
     echo "xx_gateway_watchdog_gave_up $([ "$fails" -ge "$MAX_TRIES" ] && echo 1 || echo 0)"
   } > "$OUT.tmp" && mv "$OUT.tmp" "$OUT" && chmod 644 "$OUT"
