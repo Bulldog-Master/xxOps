@@ -371,6 +371,22 @@ groups:
             so check retention before the disk decides for you.
   - name: xxops-watchdog-health
     rules:
+      - alert: GatewayWatchdogNeverRan
+        # The rule below needs xx_gateway_watchdog_last_run to EXIST. A
+        # watchdog that has never completed a run emits nothing, so that rule
+        # stays silent - which is what happened fleet-wide for most of a day
+        # after a lock permissions change. This catches the absence.
+        # xx_node_reachable is emitted only where a gateway config exists, so
+        # it identifies a gateway without hardcoding a list.
+        expr: |
+          (group by (instance) (xx_node_reachable))
+          unless on(instance) xx_gateway_watchdog_last_run
+        for: 30m
+        labels: { severity: amber }
+        annotations:
+          summary: "{{ $labels.instance }} has a watchdog that has never run"
+          detail: "This is a gateway, but it publishes no xx_gateway_watchdog_last_run at all - so its watchdog has not completed a single pass. Its other watchdog metrics may still show healthy values read from disk. Check journalctl -u xxops-gateway-watchdog on that host; a permissions problem on the lock or state directory makes every run exit silently."
+
       - alert: GatewayWatchdogNotRunning
         # It publishes metrics from state files, so a dead watchdog keeps
         # serving its last values and looks identical to a healthy one. That
