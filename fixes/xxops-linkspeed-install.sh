@@ -35,6 +35,24 @@ set -eu
 
 RAW="${XXOPS_RAW:-https://raw.githubusercontent.com/Bulldog-Master/xxOps/main}"
 
+# --- where do the components come from? ------------------------------------
+# Same rule as xxops-host-install.sh: if this is running out of a checkout,
+# install from THAT TREE rather than whatever main is right now, so an
+# audited SHA determines what lands. Piped from curl there is no path to
+# resolve and the download path runs as before. An explicit XXOPS_RAW wins.
+XX_SRC=""
+if [ -z "${XXOPS_RAW:-}" ]; then
+  _self="${BASH_SOURCE[0]:-$0}"
+  case "$_self" in
+    */*)
+      _root="$(cd "$(dirname "$_self")/.." 2>/dev/null && pwd || true)"
+      [ -n "$_root" ] && [ -f "$_root/producer/xxops-linkspeed.py" ] \
+        && XX_SRC="$_root"
+      ;;
+  esac
+fi
+if [ -n "$XX_SRC" ]; then XX_ORIGIN="$XX_SRC (this checkout)"; else XX_ORIGIN="$RAW"; fi
+
 GATEWAY_PEER=""
 NODE_PEERS=""
 BIND=""
@@ -182,28 +200,38 @@ fi
 # --- node: the test itself --------------------------------------------------
 mkdir -p /var/lib/xxops
 
-fetch(){   # fetch <url-path> <dest> <check-command>
-  local tmp; tmp="$(mktemp)"
-  if ! curl -fsS -o "$tmp" "$RAW/$1"; then
-    echo "REFUSING: could not fetch $1" >&2; rm -f "$tmp"; exit 1
-  fi
-  if ! eval "$3 \"$tmp\"" >/dev/null 2>&1; then
-    echo "REFUSING: $1 failed its check -- truncated download?" >&2
+fetch(){   # fetch <repo-path> <dest> <check-command and args...>
+  # src and dst are saved BEFORE the shift. The shift is what lets the check
+  # command be an argument list rather than a string to re-parse, but it also
+  # takes $1 and $2 away - reading them afterwards is how this broke once.
+  local tmp src dst; tmp="$(mktemp)"; src="$1"; dst="$2"
+  if [ -n "$XX_SRC" ] && [ -f "$XX_SRC/$src" ]; then
+    cp "$XX_SRC/$src" "$tmp"
+  elif ! curl -fsS -o "$tmp" "$RAW/$src"; then
+    echo "REFUSING: could not obtain $src from $XX_ORIGIN" >&2
     rm -f "$tmp"; exit 1
   fi
-  if [ -f "$2" ]; then cp -a "$2" "$2.bak"; fi
-  install -m 755 "$tmp" "$2"
+  shift 2
+  # "$@" rather than eval. Not a hole before - the check command was only
+  # ever two fixed internal values - but an argument list needs no quoting
+  # reasoning at all, and this repo has been bitten twice by eval and bash -c.
+  if ! "$@" "$tmp" >/dev/null 2>&1; then
+    echo "REFUSING: $src failed its check -- truncated download?" >&2
+    rm -f "$tmp"; exit 1
+  fi
+  if [ -f "$dst" ]; then cp -a "$dst" "$dst.bak"; fi
+  install -m 755 "$tmp" "$dst"
   rm -f "$tmp"
 }
 
 fetch producer/xxops-linkspeed.py /usr/local/bin/xxops-linkspeed.py \
-      "python3 -c 'import py_compile,sys; py_compile.compile(sys.argv[1], doraise=True)'"
+      python3 -c 'import py_compile,sys; py_compile.compile(sys.argv[1], doraise=True)'
 say "test script installed"
 
 # Measuring is useless if nothing publishes it -- the producer is what turns
 # the state file into metrics. A host left on an older copy measures
 # perfectly and reports nothing, with no error anywhere to say so.
-fetch producer/xxops-textfile.sh /usr/local/bin/xxops-textfile.sh "bash -n"
+fetch producer/xxops-textfile.sh /usr/local/bin/xxops-textfile.sh bash -n
 if ! grep -q 'ls_state=/var/lib/xxops/linkspeed.json' /usr/local/bin/xxops-textfile.sh; then
   echo "REFUSING: that producer has no link-speed block -- wrong version?" >&2
   [ -f /usr/local/bin/xxops-textfile.sh.bak ] &&
