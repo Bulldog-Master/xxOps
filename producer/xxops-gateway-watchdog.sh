@@ -98,7 +98,9 @@ if [ $(( now - $(cat "$LAST_F") )) -lt $(( COOLDOWN_MIN * 60 )) ]; then
 fi
 
 logger -t xxops-watchdog "no gossip for ${age}s — restarting $SVC"
-systemctl restart "$SVC"
+# Through sudo, against one permitted command line. Running as
+# xxops-watchdog this is the only privileged thing it can do.
+sudo -n /usr/bin/systemctl restart "$SVC"
 echo $(( $(cat "$COUNT_F") + 1 )) > "$COUNT_F"
 echo $(( $(cat "$FAIL_F") + 1 )) > "$FAIL_F"
 echo "$now" > "$LAST_F"

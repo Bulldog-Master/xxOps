@@ -513,12 +513,51 @@ if [ "$ROLE" = gateway ] && [ "$SKIP_AGENT" = no ]; then
   install -m 755 "$tmp" /usr/local/bin/xxops-gateway-watchdog.sh
   rm -f "$tmp"
 
+  # A DEDICATED ACCOUNT, not alloy. alloy runs the producer, which has had
+  # two root code-execution bugs this month - giving it a sudo rule would
+  # mean the next one can restart gateways.
+  id -u xxops-watchdog >/dev/null 2>&1 || \
+    useradd --system --no-create-home --shell /usr/sbin/nologin xxops-watchdog
+  install -d -o xxops-watchdog -g xxops-watchdog -m 750 /var/lib/xxops-watchdog
+  # Traverse on BOTH parents. /var/lib/alloy is drwxr-x--- owned by alloy, so
+  # rwx on textfile/ without x on its parent is a permission this account
+  # cannot reach - and the watchdog would silently publish nothing.
+  for _p in /opt/xxnetwork:x /opt/xxnetwork/log:rx \
+            /var/lib/alloy:x /var/lib/alloy/textfile:rwx; do
+    [ -e "${_p%%:*}" ] && setfacl -m "u:xxops-watchdog:${_p##*:}" "${_p%%:*}" \
+      2>/dev/null || true
+  done
+  runuser -u xxops-watchdog -- test -r /opt/xxnetwork/log/gateway.log \
+    || say "  WARNING: xxops-watchdog cannot read gateway.log - it will not act"
+  runuser -u xxops-watchdog -- test -w /var/lib/alloy/textfile \
+    || say "  WARNING: xxops-watchdog cannot write its metrics - no counters"
+
+  # ONE command. Not a wildcard, not a service name it supplies itself.
+  SUDOTMP="$(mktemp)"
+  printf '%s\n' \
+    "xxops-watchdog ALL=(root) NOPASSWD: /usr/bin/systemctl restart xxnetwork-gateway" \
+    > "$SUDOTMP"
+  if visudo -cf "$SUDOTMP" >/dev/null 2>&1; then
+    install -m 440 -o root -g root "$SUDOTMP" /etc/sudoers.d/xxops-watchdog
+    say "  granted: restart the gateway, and nothing else"
+  else
+    rm -f /etc/sudoers.d/xxops-watchdog
+    say "  the sudoers file did not validate - NOT installing it."
+    say "  The watchdog will still count and alert; it will not restart."
+  fi
+  rm -f "$SUDOTMP"
+
   cat > /etc/systemd/system/xxops-gateway-watchdog.service <<'EOF'
 [Unit]
 Description=xxOps gateway gossip watchdog
 [Service]
 Type=oneshot
+User=xxops-watchdog
+Group=xxops-watchdog
 ExecStart=/usr/local/bin/xxops-gateway-watchdog.sh
+NoNewPrivileges=no
+ProtectHome=read-only
+PrivateTmp=yes
 EOF
 
   cat > /etc/systemd/system/xxops-gateway-watchdog.timer <<'EOF'
