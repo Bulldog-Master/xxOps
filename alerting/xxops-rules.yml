@@ -369,6 +369,21 @@ groups:
           detail: >-
             Same projection the capacity banner uses. Usually the TSDB growing,
             so check retention before the disk decides for you.
+  - name: xxops-textfile-tmpfs
+    rules:
+      - alert: TextfileTmpfsMountsRootOwned
+        # Not an outage - a prediction. The producer writes fine today and
+        # stops at the next reboot, because the tmpfs comes back root-owned
+        # and alloy cannot write to it. Two nodes were taken out this way by
+        # unattended kernel upgrades before the metric existed, and both were
+        # found by hand hours after they went quiet.
+        expr: xx_textfile_tmpfs_at_risk == 1
+        for: 1h
+        labels: { severity: amber }
+        annotations:
+          summary: "{{ $labels.instance }} will stop reporting at its next reboot"
+          detail: "The textfile tmpfs on this host mounts root-owned because its fstab line sets uid=0 and gid=0, so after a reboot the metric producer cannot write and the node goes quiet while still looking reachable. Nothing is wrong yet. Set uid and gid to the alloy account in /etc/fstab, verify with findmnt --verify, and chown the directory so it is right now as well as after the next boot."
+
   - name: xxops-node-reporting
     rules:
       - alert: NodeRoundNumberAbsent
