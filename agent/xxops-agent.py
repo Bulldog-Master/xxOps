@@ -286,31 +286,16 @@ def a_config_drift():
     else:
         out.append("tmpfs:     fstab sets a non-root owner (good)")
 
-    # Who owns it right now, which is a different question from what fstab
-    # says: a chown fixes today and fstab decides tomorrow.
-    try:
-        st = os.stat("/var/lib/alloy/textfile")
-        import pwd
-        try:
-            owner = pwd.getpwuid(st.st_uid).pw_name
-        except KeyError:
-            owner = str(st.st_uid)
-        ok = owner == "alloy"
-        out.append("textfile:  owned by %s%s"
-                   % (owner, "" if ok else "  <- should be alloy"))
-    except OSError as e:
-        out.append("textfile:  cannot stat the directory: %s" % e)
-
-    # A dead producer keeps its last metrics published, so it looks healthy
-    # from the monitor. The file's age is the only honest signal.
-    try:
-        age = int(time.time() - os.stat(XXPROM).st_mtime)
-        out.append("producer:  xx.prom %ds old%s"
-                   % (age, "" if age < 180 else "  <- STALE, metrics frozen"))
-    except FileNotFoundError:
-        out.append("producer:  xx.prom missing - it is not running")
-    except OSError as e:
-        out.append("producer:  cannot stat xx.prom: %s" % e)
+    # NOT CHECKED HERE: who owns the textfile directory, and how old xx.prom
+    # is. The tmpfs mounts mode=755 owned by alloy, and this agent runs as
+    # xxops-agent, so both came back "Permission denied" on every node.
+    #
+    # An ACL would fix that and is deliberately not taken. The monitor
+    # already answers both questions without being asked:
+    # xx_textfile_producer_last_run goes stale, and NodeRoundNumberAbsent
+    # fires - both of which reached the operator on the day this was found.
+    # Widening what the agent can reach, so a button can duplicate an alert,
+    # is not worth undoing the privilege work those audits asked for.
 
     # Gateways only. The watchdog took its lock in /var/lock, which stayed
     # root-owned after it dropped privilege, so every run exited silently for
