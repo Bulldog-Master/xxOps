@@ -955,6 +955,31 @@ the script prints the state of your services at the end so you can see that.
 To restore: `sudo tar -xzf /root/xxops-uninstall-<stamp>.tar.gz -C /`, then
 `systemctl daemon-reload` and re-enable the units.
 
+### And the monitor
+
+    sudo bash install-monitor-uninstall.sh           # shows what it would do
+    sudo bash install-monitor-uninstall.sh --apply   # archives, then removes
+
+Same shape: dry run by default, everything tarred into `/root` first. It
+removes the xxOps units, the app, its state, the alert rules and the two
+scripts in `/usr/local/bin`.
+
+**It does not remove Prometheus or Alertmanager.** The installer never put
+them there — you did, by hand, in Part 1 — and on a machine that runs other
+things they may not be yours alone to remove. Add `--purge-config` to remove
+the config xxOps wrote for them as well, but note Prometheus will not start
+again without one.
+
+It never touches `/opt/xxnetwork` either. A monitor often shares a machine
+with a gateway, and that gateway keeps earning throughout.
+
+> [!WARNING]
+> `/etc/xxops/cmd_key` is the key every agent on every host trusts. It is in
+> the archive, but a reinstall generates a **different** key, and no host will
+> accept commands again until each one has been reinstalled against the new
+> monitor. Metrics and alerts carry on; the Commands tab does not. Restoring
+> that one file from the archive is what avoids reinstalling every host.
+
 
 ## What this guide does not cover
 
