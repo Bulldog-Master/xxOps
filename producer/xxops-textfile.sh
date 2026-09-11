@@ -532,6 +532,23 @@ fi
 xxu="$(id -un 2>/dev/null | tr -d '"\\')"
 [ -n "$xxu" ] && emit "xx_producer_user{user=\"$xxu\"} 1"
 
+# --- does this host go dark at its next reboot? -----------------------------
+# A tmpfs on the textfile directory mounts root-owned unless fstab sets uid
+# and gid, and the producer then cannot write. The host looks healthy until it
+# reboots. Two nodes went dark this way after unattended kernel upgrades, and
+# finding the rest meant a shell snippet on every machine.
+#
+# /etc/fstab is world-readable and this runs everywhere, so the fleet can just
+# say. Emitted only where a tmpfs line exists, so gateways never appear and
+# the alert can test == 1.
+xxfs="$(grep -h 'alloy/textfile' /etc/fstab 2>/dev/null | grep -v '^[[:space:]]*#' | head -1)"
+if [ -n "$xxfs" ]; then
+  case "$xxfs" in
+    *uid=0*|*gid=0*) emit "xx_textfile_tmpfs_at_risk 1" ;;
+    *)               emit "xx_textfile_tmpfs_at_risk 0" ;;
+  esac
+fi
+
 emit "xx_textfile_producer_last_run $(date +%s)"
 mv "$TMP" "$OUT"
 chmod 644 "$OUT"
