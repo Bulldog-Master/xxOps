@@ -604,7 +604,15 @@ if command -v dmidecode >/dev/null 2>&1; then
   mkdir -p /etc/xxops
   dmidecode -t memory 2>/dev/null | awk '
     /^Memory Device/                 { dev=1; next }
-    dev && /^\tSize:/                { total++; if ($2 ~ /^[0-9]+$/) { used++; mb=$2 } }
+    # dmidecode says "16384 MB" on some boards and "16 GB" on others.
+    # Assuming MB made every GB-reporting host record 16, which showed
+    # as 0GB once divided. Read the unit it actually printed.
+    dev && /^\tSize:/ { total++
+      if ($2 ~ /^[0-9]+$/) { used++
+        if ($3 == "GB")      mb = $2 * 1024
+        else if ($3 == "MB") mb = $2
+        else                 mb = 0
+      } }
     dev && /^\tType:/ && $2!="Unknown"  { ty=$2 }
     dev && /^\tSpeed:/ && $2 ~ /^[0-9]+$/ { sp=$2 }
     END {
