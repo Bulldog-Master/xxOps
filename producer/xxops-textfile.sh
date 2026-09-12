@@ -549,6 +549,33 @@ if [ -n "$xxfs" ]; then
   esac
 fi
 
+# --- memory slots ------------------------------------------------------------
+# Written by the installer, which runs as root; this account cannot read the
+# DMI tables itself. Absent on a VPS, where slot data is meaningless anyway.
+#
+# Type and speed become LABEL VALUES, so they are stripped the same way
+# cpu_model is: one malformed line makes the collector reject this whole file.
+if [ -r /etc/xxops/meminfo ]; then
+  mem_total=""; mem_used=""; mem_mb=""; mem_type=""; mem_speed=""
+  while IFS='=' read -r k v; do
+    case "$k" in
+      SLOTS_TOTAL) mem_total="$v" ;;
+      SLOTS_USED)  mem_used="$v" ;;
+      MODULE_MB)   mem_mb="$v" ;;
+      TYPE)        mem_type="$(printf '%s' "$v" | tr -d '"\\')" ;;
+      SPEED)       mem_speed="$(printf '%s' "$v" | tr -d '"\\')" ;;
+    esac
+  done < /etc/xxops/meminfo
+  case "$mem_total" in ''|*[!0-9]*) mem_total="" ;; esac
+  case "$mem_used"  in ''|*[!0-9]*) mem_used=""  ;; esac
+  if [ -n "$mem_total" ] && [ -n "$mem_used" ]; then
+    emit "xx_mem_slots_total $mem_total"
+    emit "xx_mem_slots_used $mem_used"
+    [ -n "$mem_mb" ] && emit "xx_mem_module_mb $mem_mb"
+    emit "xx_mem_info{type=\"$mem_type\",speed=\"$mem_speed\"} 1"
+  fi
+fi
+
 emit "xx_textfile_producer_last_run $(date +%s)"
 mv "$TMP" "$OUT"
 chmod 644 "$OUT"

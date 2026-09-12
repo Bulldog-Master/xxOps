@@ -596,6 +596,34 @@ fi
 
 # --- logrotate ---------------------------------------------------------------
 CURRENT="adding a logrotate rule"
+step "Recording the memory layout"
+# dmidecode needs root and the producer does not have it, so this runs HERE,
+# once, and writes a file the producer can read. Memory changes when someone
+# opens the case - re-running this installer is the refresh.
+if command -v dmidecode >/dev/null 2>&1; then
+  mkdir -p /etc/xxops
+  dmidecode -t memory 2>/dev/null | awk '
+    /^Memory Device/                 { dev=1; next }
+    dev && /^\tSize:/                { total++; if ($2 ~ /^[0-9]+$/) { used++; mb=$2 } }
+    dev && /^\tType:/ && $2!="Unknown"  { ty=$2 }
+    dev && /^\tSpeed:/ && $2 ~ /^[0-9]+$/ { sp=$2 }
+    END {
+      if (total > 0) {
+        printf "SLOTS_TOTAL=%d\nSLOTS_USED=%d\nMODULE_MB=%d\nTYPE=%s\nSPEED=%s\n",
+               total, used+0, mb+0, (ty==""?"unknown":ty), (sp==""?"0":sp)
+      }
+    }' > /etc/xxops/meminfo.tmp
+  if [ -s /etc/xxops/meminfo.tmp ]; then
+    install -m 644 /etc/xxops/meminfo.tmp /etc/xxops/meminfo
+    say "  populated $(sed -n 's/^SLOTS_USED=//p' /etc/xxops/meminfo) of $(sed -n 's/^SLOTS_TOTAL=//p' /etc/xxops/meminfo) slots"
+  else
+    say "  no usable slot data - skipping (normal on a VPS)"
+  fi
+  rm -f /etc/xxops/meminfo.tmp
+else
+  say "  dmidecode not installed - skipping"
+fi
+
 step "Adding a logrotate rule"
 U="$(stat -c '%U' /opt/xxnetwork 2>/dev/null || echo root)"
 if [ "$ROLE" = gateway ]; then
